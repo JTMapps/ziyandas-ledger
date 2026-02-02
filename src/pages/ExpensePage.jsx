@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-
-const PERSONAL_ENTITY_ID = 'REPLACE_WITH_YOUR_ENTITY_ID'
+import { useEntity } from '../context/EntityContext'
 
 const CATEGORIES = [
   'Food',
@@ -18,6 +17,8 @@ const CATEGORIES = [
 ]
 
 export default function ExpensePage() {
+  const { entity, loading: entityLoading } = useEntity()
+
   const [entries, setEntries] = useState([])
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('Food')
@@ -25,16 +26,21 @@ export default function ExpensePage() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    loadExpenses()
-  }, [])
+    if (entity) {
+      loadExpenses()
+    }
+  }, [entity])
 
   async function loadExpenses() {
     const { data, error } = await supabase
       .from('expense_entries')
       .select('*')
+      .eq('entity_id', entity.id)
       .order('date_spent', { ascending: false })
 
-    if (!error) setEntries(data)
+    if (!error) {
+      setEntries(data || [])
+    }
   }
 
   async function addExpense(e) {
@@ -47,7 +53,7 @@ export default function ExpensePage() {
 
     const { error } = await supabase.from('expense_entries').insert({
       user_id: user.id,
-      entity_id: PERSONAL_ENTITY_ID,
+      entity_id: entity.id,
       amount,
       category,
       description,
@@ -59,12 +65,20 @@ export default function ExpensePage() {
     setDescription('')
     setCategory('Food')
 
-    if (!error) loadExpenses()
+    if (!error) {
+      loadExpenses()
+    }
+  }
+
+  if (entityLoading) {
+    return <div>Loading entity…</div>
   }
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-4">Expenses</h1>
+      <h1 className="text-xl font-bold mb-4">
+        Expenses — {entity.name}
+      </h1>
 
       <form onSubmit={addExpense} className="flex gap-2 mb-6">
         <input
@@ -101,7 +115,7 @@ export default function ExpensePage() {
           disabled={loading}
           className="bg-black text-white px-4"
         >
-          Add
+          {loading ? 'Adding…' : 'Add'}
         </button>
       </form>
 

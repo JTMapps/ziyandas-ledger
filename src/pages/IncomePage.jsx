@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-
-const PERSONAL_ENTITY_ID = 'REPLACE_WITH_YOUR_ENTITY_ID'
+import { useEntity } from '../context/EntityContext'
 
 export default function IncomePage() {
+  const { entity, loading: entityLoading } = useEntity()
+
   const [entries, setEntries] = useState([])
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    loadIncome()
-  }, [])
+    if (entity) {
+      loadIncome()
+    }
+  }, [entity])
 
   async function loadIncome() {
     const { data, error } = await supabase
       .from('income_entries')
       .select('*')
+      .eq('entity_id', entity.id)
       .order('date_received', { ascending: false })
 
-    if (!error) setEntries(data)
+    if (!error) {
+      setEntries(data || [])
+    }
   }
 
   async function addIncome(e) {
@@ -32,7 +38,7 @@ export default function IncomePage() {
 
     const { error } = await supabase.from('income_entries').insert({
       user_id: user.id,
-      entity_id: PERSONAL_ENTITY_ID,
+      entity_id: entity.id,
       amount_net: amount,
       description,
       date_received: new Date(),
@@ -42,12 +48,20 @@ export default function IncomePage() {
     setAmount('')
     setDescription('')
 
-    if (!error) loadIncome()
+    if (!error) {
+      loadIncome()
+    }
+  }
+
+  if (entityLoading) {
+    return <div>Loading entity…</div>
   }
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-4">Income</h1>
+      <h1 className="text-xl font-bold mb-4">
+        Income — {entity.name}
+      </h1>
 
       <form onSubmit={addIncome} className="flex gap-2 mb-6">
         <input
@@ -72,7 +86,7 @@ export default function IncomePage() {
           disabled={loading}
           className="bg-black text-white px-4"
         >
-          Add
+          {loading ? 'Adding…' : 'Add'}
         </button>
       </form>
 
