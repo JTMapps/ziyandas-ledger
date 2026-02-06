@@ -8,9 +8,14 @@ export default function EntitiesPage() {
 
   useEffect(() => {
     async function load() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
       const { data } = await supabase
         .from('entities')
         .select('*')
+        .eq('created_by', user.id)
         .order('created_at')
 
       setEntities(data || [])

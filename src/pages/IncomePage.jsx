@@ -41,7 +41,7 @@ export default function IncomePage() {
       entity_id: entity.id,
       amount_net: amount,
       description,
-      date_received: new Date(),
+      date_received: new Date().toISOString().split('T')[0],
     })
 
     setLoading(false)

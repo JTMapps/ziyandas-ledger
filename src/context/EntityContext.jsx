@@ -3,14 +3,14 @@ import { supabase } from '../lib/supabase'
 
 const EntityContext = createContext()
 
-export function EntityProvider({ children }) {
+export function EntityProvider({ children, entityId = null }) {
   const [entities, setEntities] = useState([])
   const [entity, setEntity] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadEntities()
-  }, [])
+  }, [entityId])
 
   async function loadEntities() {
     setLoading(true)
@@ -27,11 +27,20 @@ export function EntityProvider({ children }) {
     const { data, error } = await supabase
       .from('entities')
       .select('*')
+      .eq('created_by', user.id)
       .order('created_at', { ascending: true })
 
     if (!error && data.length > 0) {
       setEntities(data)
-      setEntity(prev => prev ?? data[0]) // default to first entity
+      
+      // If entityId is provided, select that specific entity
+      // Otherwise, default to first entity
+      if (entityId) {
+        const selectedEntity = data.find(e => e.id === entityId)
+        setEntity(selectedEntity || data[0])
+      } else {
+        setEntity(prev => prev ?? data[0])
+      }
     }
 
     setLoading(false)

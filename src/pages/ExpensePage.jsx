@@ -57,7 +57,7 @@ export default function ExpensePage() {
       amount,
       category,
       description,
-      date_spent: new Date(),
+      date_spent: new Date().toISOString().split('T')[0],
     })
 
     setLoading(false)

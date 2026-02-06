@@ -14,7 +14,7 @@ export default function EntityGate() {
       const { data, error } = await supabase
         .from('entities')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('created_by', user.id)
         .limit(1)
 
       if (error || !data || data.length === 0) {
