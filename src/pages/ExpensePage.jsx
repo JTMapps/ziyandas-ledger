@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useEntity } from '../context/EntityContext'
 
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   'Food',
   'Transport',
   'Medical',
@@ -21,7 +21,8 @@ export default function ExpensePage() {
 
   const [entries, setEntries] = useState([])
   const [amount, setAmount] = useState('')
-  const [category, setCategory] = useState('Food')
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES)
+  const [category, setCategory] = useState(DEFAULT_CATEGORIES[0])
   const [description, setDescription] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -30,6 +31,46 @@ export default function ExpensePage() {
       loadExpenses()
     }
   }, [entity])
+
+  useEffect(() => {
+    async function loadCategories() {
+      // Try RPC for enum values first
+      try {
+        const { data, error } = await supabase.rpc('get_enum_values', { type_name: 'expense_category' })
+        if (!error && data && data.length > 0) {
+          const vals = data.map(d => d.value)
+          setCategories(vals)
+          setCategory(vals[0])
+          return
+        }
+      } catch (e) {
+        // fallthrough
+      }
+
+      // Fallback: try to derive from existing expense entries
+      try {
+        const { data } = await supabase
+          .from('expense_entries')
+          .select('category')
+          .neq('category', null)
+          .order('category')
+
+        if (data && data.length > 0) {
+          const unique = Array.from(new Set(data.map(d => d.category))).sort()
+          setCategories(unique)
+          setCategory(unique[0])
+          return
+        }
+      } catch (e) {
+        // fallthrough to defaults
+      }
+
+      setCategories(DEFAULT_CATEGORIES)
+      setCategory(DEFAULT_CATEGORIES[0])
+    }
+
+    loadCategories()
+  }, [])
 
   async function loadExpenses() {
     const { data, error } = await supabase
@@ -63,7 +104,7 @@ export default function ExpensePage() {
     setLoading(false)
     setAmount('')
     setDescription('')
-    setCategory('Food')
+    setCategory(categories?.[0] || DEFAULT_CATEGORIES[0])
 
     if (!error) {
       loadExpenses()
@@ -95,7 +136,7 @@ export default function ExpensePage() {
           value={category}
           onChange={e => setCategory(e.target.value)}
         >
-          {CATEGORIES.map(cat => (
+          {categories.map(cat => (
             <option key={cat} value={cat}>
               {cat}
             </option>
