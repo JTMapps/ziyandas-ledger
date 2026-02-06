@@ -18,9 +18,9 @@ export default function EntityGate() {
         .limit(1)
 
       if (error || !data || data.length === 0) {
-        navigate('/entities/new', { replace: true })
+        navigate('/profile', { replace: true })
       } else {
-        navigate('/entities', { replace: true })
+        navigate('/profile', { replace: true })
       }
     }
 

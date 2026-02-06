@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import AuthPage from './AuthPage'
 import EntityGate from './EntityGate'
 import EntitySetup from './EntitySetup'
-import EntitiesPage from './EntitiesPage'
+import ProfilePage from './ProfilePage'
 import EntityDashboard from './EntityDashboard'
 
 export default function App() {
@@ -37,7 +37,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<EntityGate />} />
       <Route path="/entities/new" element={<EntitySetup />} />
-      <Route path="/entities" element={<EntitiesPage />} />
+      <Route path="/profile" element={<ProfilePage />} />
       <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
     </Routes>
   )

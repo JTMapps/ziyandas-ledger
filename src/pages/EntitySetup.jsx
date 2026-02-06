@@ -1,12 +1,37 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function EntitySetup() {
   const [name, setName] = useState('')
-  const [type, setType] = useState('Personal')
+  const DEFAULT_TYPES = ['Personal', 'Trust', 'Holding', 'Business']
+  const [types, setTypes] = useState(DEFAULT_TYPES)
+  const [type, setType] = useState(DEFAULT_TYPES[0])
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    async function loadTypes() {
+      // Try RPC first (authoritative enum labels)
+      try {
+        const { data, error } = await supabase.rpc('get_enum_values', { type_name: 'entity_type' })
+        if (!error && data && data.length > 0) {
+          const vals = data.map(d => d.value)
+          setTypes(vals)
+          setType(vals[0])
+          return
+        }
+      } catch (e) {
+        // fallthrough to defaults
+      }
+
+      // Fallback: keep DEFAULT_TYPES
+      setTypes(DEFAULT_TYPES)
+      setType(DEFAULT_TYPES[0])
+    }
+
+    loadTypes()
+  }, [])
 
   async function handleCreate(e) {
     e.preventDefault()
@@ -29,7 +54,7 @@ export default function EntitySetup() {
     setLoading(false)
 
     if (!error && data) {
-      navigate(`/entities/${data.id}`, { replace: true })
+      navigate('/profile', { replace: true })
     }
   }
 
@@ -51,10 +76,9 @@ export default function EntitySetup() {
           value={type}
           onChange={e => setType(e.target.value)}
         >
-          <option value="Personal">Personal</option>
-          <option value="Trust">Trust</option>
-          <option value="Holding">Holding</option>
-          <option value="Business">Business</option>
+          {types.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
 
         <button
