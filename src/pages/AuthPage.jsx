@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -29,9 +31,11 @@ export default function AuthPage() {
 
     if (result.error) {
       setError(result.error.message)
+      setLoading(false)
+    } else {
+      // Success - navigate to profile page
+      navigate('/profile')
     }
-
-    setLoading(false)
   }
 
   return (

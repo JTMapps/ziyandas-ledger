@@ -35,7 +35,9 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/auth" element={<AuthPage />} />
       <Route path="/" element={<EntityGate />} />
+
       <Route path="/entities/new" element={<EntitySetup />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
