@@ -13,9 +13,25 @@
  */
 
 import { supabase } from '../lib/supabase'
-import { queryEventsByEntity } from './eventService'
-import { getIncomeByEntity } from './incomeService'
-import { getExpenseByEntity } from './expenseService'
+
+// Safe numeric helpers in case global Math is shadowed or mutated
+function safeAbs(v) {
+  const n = Number(v || 0)
+  return n < 0 ? -n : n
+}
+
+function safeMax(...args) {
+  const nums = args.map(a => Number(a || 0))
+  return nums.reduce((m, v) => (v > m ? v : m), nums[0] ?? 0)
+}
+
+// Ensure value is always an array to avoid ".forEach is not a function" errors
+function safeArray(val) {
+  if (Array.isArray(val)) return val
+  if (val === null || val === undefined) return []
+  if (typeof val === 'object' && val.length !== undefined) return Array.from(val)
+  return []
+}
 
 /**
  * Get cash flow analysis grouped by date
@@ -67,7 +83,7 @@ export async function getCashFlow(entityId, startDate, endDate, granularity = 'd
     const flowByDate = {}
     let runningBalance = 0
 
-    (effects || []).forEach(effect => {
+    safeArray(effects).forEach(effect => {
       const date = effect.created_at.split('T')[0]
       if (!flowByDate[date]) {
         flowByDate[date] = { inflow: 0, outflow: 0, net: 0, balance: 0 }
@@ -76,7 +92,7 @@ export async function getCashFlow(entityId, startDate, endDate, granularity = 'd
       if (effect.amount > 0) {
         flowByDate[date].inflow += effect.amount
       } else {
-        flowByDate[date].outflow += Math.abs(effect.amount)
+        flowByDate[date].outflow += safeAbs(effect.amount)
       }
       flowByDate[date].net += effect.amount
     })
@@ -186,7 +202,7 @@ export async function getIncomeStatement(entityId, startDate, endDate) {
     const incomeByClass = {}
     let totalIncome = 0
 
-    (incomeRecs || []).forEach(rec => {
+    safeArray(incomeRecs).forEach(rec => {
       const income = rec.amount || 0
       totalIncome += income
       incomeByClass['GENERAL'] = (incomeByClass['GENERAL'] || 0) + income
@@ -198,8 +214,8 @@ export async function getIncomeStatement(entityId, startDate, endDate) {
     let deductibleExpenses = 0
     let nonDeductibleExpenses = 0
 
-    (expenseRecs || []).forEach(rec => {
-      const expense = Math.abs(rec.amount) || 0
+    safeArray(expenseRecs).forEach(rec => {
+      const expense = safeAbs(rec.amount) || 0
       totalExpenses += expense
       // Assume all expenses recorded through event_effects are deductible
       deductibleExpenses += expense
@@ -379,7 +395,7 @@ export async function getTaxSummary(entityId, year) {
     let taxableIncome = 0
     let taxExemptIncome = 0
 
-    (incomeRecs || []).forEach(rec => {
+    safeArray(incomeRecs).forEach(rec => {
       const income = rec.amount || 0
       grossIncome += income
       taxableIncome += income  // Assume all income is taxable by default
@@ -388,12 +404,12 @@ export async function getTaxSummary(entityId, year) {
     let deductibleExpenses = 0
     let nonDeductibleExpenses = 0
 
-    (expenseRecs || []).forEach(rec => {
+    safeArray(expenseRecs).forEach(rec => {
       // Assume all expenses recorded are deductible
-      deductibleExpenses += Math.abs(rec.amount || 0)
+      deductibleExpenses += safeAbs(rec.amount || 0)
     })
 
-    const effectiveTaxBase = Math.max(0, taxableIncome - deductibleExpenses)
+    const effectiveTaxBase = safeMax(0, taxableIncome - deductibleExpenses)
 
     return {
       success: true,
@@ -458,7 +474,7 @@ export async function getMonthlySummary(entityId, year) {
             .eq('effect_type', 'INCOME_RECOGNIZED')
             .in('event_id', eventIds)
 
-          totalIncome = (incomeRes.data || []).reduce((sum, r) => sum + (r.amount || 0), 0)
+          totalIncome = safeArray(incomeRes.data).reduce((sum, r) => sum + (r.amount || 0), 0)
         }
 
         // Step 3: Get expense effects for these events
@@ -470,7 +486,7 @@ export async function getMonthlySummary(entityId, year) {
             .eq('effect_type', 'EXPENSE_RECOGNIZED')
             .in('event_id', eventIds)
 
-          totalExpense = (expenseRes.data || []).reduce((sum, r) => sum + Math.abs(r.amount || 0), 0)
+          totalExpense = safeArray(expenseRes.data).reduce((sum, r) => sum + safeAbs(r.amount || 0), 0)
         }
 
         return {
@@ -496,10 +512,4 @@ export async function getMonthlySummary(entityId, year) {
   }
 }
 
-export default {
-  getCashFlow,
-  getIncomeStatement,
-  getBalanceSheet,
-  getTaxSummary,
-  getMonthlySummary
-}
+

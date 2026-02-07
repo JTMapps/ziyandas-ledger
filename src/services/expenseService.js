@@ -441,10 +441,4 @@ export async function voidExpense(expenseEventId, reason) {
   }
 }
 
-export default {
-  addExpense,
-  getExpenseByEntity,
-  getTotalExpense,
-  getExpensesByCategory,
-  voidExpense
-}
+

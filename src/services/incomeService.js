@@ -342,9 +342,4 @@ export async function voidIncome(incomeEventId, reason) {
   }
 }
 
-export default {
-  addIncome,
-  getIncomeByEntity,
-  getTotalIncome,
-  voidIncome
-}
+

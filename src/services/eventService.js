@@ -341,10 +341,4 @@ export async function getEventWithEffects(eventId) {
   }
 }
 
-export default {
-  recordEconomicEvent,
-  queryEventsByEntity,
-  queryEventEffects,
-  sumEffectsByType,
-  getEventWithEffects
-}
+

@@ -336,12 +336,4 @@ export async function getEntitySummary(entityId, startDate, endDate) {
   }
 }
 
-export default {
-  createEntity,
-  getMyEntities,
-  getEntity,
-  updateEntityName,
-  deleteEntity,
-  userOwnsEntity,
-  getEntitySummary
-}
+

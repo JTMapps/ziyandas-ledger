@@ -385,9 +385,4 @@ function calculateDaysSince(createdAt) {
   return Math.floor(diffTime / (1000 * 60 * 60 * 24))
 }
 
-export default {
-  addLiability,
-  getLiabilitiesByEntity,
-  recordLiabilityPayment,
-  getLiabilitySummary
-}
+

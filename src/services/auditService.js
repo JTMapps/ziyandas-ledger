@@ -425,11 +425,4 @@ export async function getComplianceReport(tableName, startDate, endDate) {
   }
 }
 
-export default {
-  getAuditTrail,
-  getTableAuditLog,
-  getUserActivity,
-  getServiceActivity,
-  getRecordChanges,
-  getComplianceReport
-}
+

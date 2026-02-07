@@ -367,9 +367,4 @@ function calculateMonthsUsed(acquisitionDate) {
   return Math.max(0, months)
 }
 
-export default {
-  addAsset,
-  getAssetsByEntity,
-  disposeAsset,
-  getAssetSummary
-}
+

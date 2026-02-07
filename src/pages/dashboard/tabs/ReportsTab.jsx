@@ -129,15 +129,15 @@ export default function ReportsTab() {
   function generateIncomeStatementCSV() {
     const data = reportData
     let csv = `Income Statement - ${year}-${String(month).padStart(2, '0')}\n\n`
-    csv += `Total Income,${data.totalIncome}\n`
+    csv += `Total Income,${Number(data.totalIncome ?? 0)}\n`
 
     for (const [cls, val] of Object.entries(data.incomeByClass || {})) {
       csv += `,${cls},${val}\n`
     }
 
-    csv += `\nTotal Expenses,${data.totalExpenses}\n`
-    csv += `Deductible Expenses,${data.deductibleExpenses}\n`
-    csv += `Non-Deductible Expenses,${data.nonDeductibleExpenses}\n`
+      csv += `\nTotal Expenses,${Number(data.totalExpenses ?? 0)}\n`
+    csv += `Deductible Expenses,${Number(data.deductibleExpenses ?? 0)}\n`
+    csv += `Non-Deductible Expenses,${Number(data.nonDeductibleExpenses ?? 0)}\n`
 
     for (const [nature, val] of Object.entries(data.expenseByNature || {})) {
       csv += `,${nature},${val}\n`
@@ -158,15 +158,15 @@ export default function ReportsTab() {
       csv += `${type},${val}\n`
     }
 
-    csv += `Total Assets,${data.totalAssets}\n`
+    csv += `Total Assets,${Number(data.totalAssets ?? 0)}\n`
     csv += '\nLIABILITIES\n'
 
     for (const [type, val] of Object.entries(data.liabilities || {})) {
       csv += `${type},${val}\n`
     }
 
-    csv += `Total Liabilities,${data.totalLiabilities}\n`
-    csv += `\nNet Equity,${data.equity}\n`
+    csv += `Total Liabilities,${Number(data.totalLiabilities ?? 0)}\n`
+    csv += `\nNet Equity,${Number(data.equity ?? 0)}\n`
 
     return csv
   }
@@ -175,14 +175,14 @@ export default function ReportsTab() {
     const data = reportData
     let csv = `Tax Compliance Report - ${year}\n\n`
     csv += 'INCOME SUMMARY\n'
-    csv += `Gross Income,${data.grossIncome}\n`
-    csv += `Tax Exempt Income,${data.taxExemptIncome}\n`
-    csv += `Taxable Income,${data.taxableIncome}\n`
+    csv += `Gross Income,${Number(data.grossIncome ?? 0)}\n`
+    csv += `Tax Exempt Income,${Number(data.taxExemptIncome ?? 0)}\n`
+    csv += `Taxable Income,${Number(data.taxableIncome ?? 0)}\n`
     csv += '\nEXPENSE SUMMARY\n'
-    csv += `Deductible Expenses,${data.deductibleExpenses}\n`
-    csv += `Non-Deductible Expenses,${data.nonDeductibleExpenses}\n`
-    csv += `\nEffective Tax Base,${data.effectiveTaxBase}\n`
-    csv += `Estimated Tax (28%),${data.effectiveTaxBase * 0.28}\n`
+    csv += `Deductible Expenses,${Number(data.deductibleExpenses ?? 0)}\n`
+    csv += `Non-Deductible Expenses,${Number(data.nonDeductibleExpenses ?? 0)}\n`
+    csv += `\nEffective Tax Base,${Number(data.effectiveTaxBase ?? 0)}\n`
+    csv += `Estimated Tax (28%),${Number(data.effectiveTaxBase ?? 0) * 0.28}\n`
 
     return csv
   }
@@ -327,7 +327,7 @@ export default function ReportsTab() {
                     <tr key={cls} className="border-b">
                       <td className="py-2 pl-4">{cls}</td>
                       <td className="text-right font-semibold">
-                        R {(val || 0).toFixed(2)}
+                        R {Number(val ?? 0).toFixed(2)}
                       </td>
                     </tr>
                   ))}
@@ -344,24 +344,24 @@ export default function ReportsTab() {
                     <tr key={nature} className="border-b">
                       <td className="py-2 pl-4">{nature}</td>
                       <td className="text-right font-semibold">
-                        R {(val || 0).toFixed(2)}
+                        R {Number(val ?? 0).toFixed(2)}
                       </td>
                     </tr>
                   ))}
                   <tr className="border-b">
                     <td className="py-2 pl-4 text-sm text-gray-600">Deductible</td>
                     <td className="text-right text-sm text-gray-600">
-                      R {(reportData?.deductibleExpenses || 0).toFixed(2)}
+                      R {Number(reportData?.deductibleExpenses ?? 0).toFixed(2)}
                     </td>
                   </tr>
                   <tr className="border-b-2">
                     <td className="py-2 font-semibold">Total Expenses</td>
-                    <td className="text-right font-bold">R {(reportData?.totalExpenses || 0).toFixed(2)}</td>
+                    <td className="text-right font-bold">R {Number(reportData?.totalExpenses ?? 0).toFixed(2)}</td>
                   </tr>
 
                   <tr className="bg-gray-100">
                     <td className="py-2 font-bold">Net Income</td>
-                    <td className="text-right font-bold">R {(reportData?.netIncome || 0).toFixed(2)}</td>
+                    <td className="text-right font-bold">R {Number(reportData?.netIncome ?? 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -383,14 +383,14 @@ export default function ReportsTab() {
                     <td className="text-right"></td>
                   </tr>
                   {Object.entries(reportData?.assets || {}).map(([type, val]) => (
-                    <tr key={type} className="border-b">
-                      <td className="py-2 pl-4">{type}</td>
-                      <td className="text-right">R {(val || 0).toFixed(2)}</td>
-                    </tr>
+                      <tr key={type} className="border-b">
+                        <td className="py-2 pl-4">{type}</td>
+                        <td className="text-right">R {Number(val ?? 0).toFixed(2)}</td>
+                      </tr>
                   ))}
                   <tr className="bg-blue-50 font-bold">
                     <td className="py-2">Total Assets</td>
-                    <td className="text-right">R {(reportData?.totalAssets || 0).toFixed(2)}</td>
+                    <td className="text-right">R {Number(reportData?.totalAssets ?? 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -406,19 +406,19 @@ export default function ReportsTab() {
                     <td className="text-right"></td>
                   </tr>
                   {Object.entries(reportData?.liabilities || {}).map(([type, val]) => (
-                    <tr key={type} className="border-b">
-                      <td className="py-2 pl-4">{type}</td>
-                      <td className="text-right">R {(val || 0).toFixed(2)}</td>
-                    </tr>
+                      <tr key={type} className="border-b">
+                        <td className="py-2 pl-4">{type}</td>
+                        <td className="text-right">R {Number(val ?? 0).toFixed(2)}</td>
+                      </tr>
                   ))}
                   <tr className="bg-red-50 font-bold">
                     <td className="py-2">Total Liabilities</td>
-                    <td className="text-right">R {(reportData?.totalLiabilities || 0).toFixed(2)}</td>
+                    <td className="text-right">R {Number(reportData?.totalLiabilities ?? 0).toFixed(2)}</td>
                   </tr>
 
-                  <tr className="border-t-2 bg-green-50 font-bold text-lg">
+                    <tr className="border-t-2 bg-green-50 font-bold text-lg">
                     <td className="py-3">Net Equity</td>
-                    <td className="text-right">R {(reportData?.equity || 0).toFixed(2)}</td>
+                    <td className="text-right">R {Number(reportData?.equity ?? 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -440,15 +440,15 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="border-b">
                         <td className="py-2">Gross Income</td>
-                        <td className="text-right">R {(reportData?.grossIncome || 0).toFixed(2)}</td>
+                        <td className="text-right">R {Number(reportData?.grossIncome ?? 0).toFixed(2)}</td>
                       </tr>
                       <tr className="border-b">
                         <td className="py-2">Tax Exempt Income</td>
-                        <td className="text-right text-green-600">- R {(reportData?.taxExemptIncome || 0).toFixed(2)}</td>
+                        <td className="text-right text-green-600">- R {Number(reportData?.taxExemptIncome ?? 0).toFixed(2)}</td>
                       </tr>
                       <tr className="bg-gray-100 font-bold border-b">
                         <td className="py-2">Taxable Income</td>
-                        <td className="text-right">R {(reportData?.taxableIncome || 0).toFixed(2)}</td>
+                        <td className="text-right">R {Number(reportData?.taxableIncome ?? 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -460,11 +460,11 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="border-b">
                         <td className="py-2">Deductible Expenses</td>
-                        <td className="text-right text-green-600">R {(reportData?.deductibleExpenses || 0).toFixed(2)}</td>
+                        <td className="text-right text-green-600">R {Number(reportData?.deductibleExpenses ?? 0).toFixed(2)}</td>
                       </tr>
                       <tr className="border-b">
                         <td className="py-2">Non-Deductible Expenses</td>
-                        <td className="text-right text-red-600">R {(reportData?.nonDeductibleExpenses || 0).toFixed(2)}</td>
+                        <td className="text-right text-red-600">R {Number(reportData?.nonDeductibleExpenses ?? 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -475,12 +475,12 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="font-bold text-lg">
                         <td className="py-2">Effective Tax Base</td>
-                        <td className="text-right">R {(reportData?.effectiveTaxBase || 0).toFixed(2)}</td>
+                        <td className="text-right">R {Number(reportData?.effectiveTaxBase ?? 0).toFixed(2)}</td>
                       </tr>
                       <tr>
                         <td className="py-2 text-sm">@ 28% Corporate Tax Rate</td>
                         <td className="text-right text-sm font-semibold">
-                          R {(((reportData?.effectiveTaxBase || 0) * 0.28)).toFixed(2)}
+                          R {Number(Number(reportData?.effectiveTaxBase ?? 0) * 0.28).toFixed(2)}
                         </td>
                       </tr>
                     </tbody>

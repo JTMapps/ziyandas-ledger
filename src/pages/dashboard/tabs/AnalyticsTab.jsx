@@ -42,38 +42,43 @@ export default function AnalyticsTab() {
 
       if (view === 'INCOME_STATEMENT') {
         const result = await getIncomeStatement(entity.id, startDate, endDate)
-        if (result.success) {
+        console.debug('getIncomeStatement ->', result)
+        if (result && result.success) {
           setIncomeStatement(result.data)
         } else {
-          setError(result.error)
+          setError(result?.error || 'Failed to load income statement')
         }
       } else if (view === 'BALANCE_SHEET') {
         const result = await getBalanceSheet(entity.id)
-        if (result.success) {
+        console.debug('getBalanceSheet ->', result)
+        if (result && result.success) {
           setBalanceSheet(result.data)
         } else {
-          setError(result.error)
+          setError(result?.error || 'Failed to load balance sheet')
         }
       } else if (view === 'CASH_FLOW') {
         const result = await getCashFlow(entity.id, startDate, endDate, 'MONTHLY')
-        if (result.success) {
+        console.debug('getCashFlow ->', result)
+        if (result && result.success) {
           setCashFlow(result.data)
         } else {
-          setError(result.error)
+          setError(result?.error || 'Failed to load cash flow')
         }
       } else if (view === 'TAX_SUMMARY') {
         const result = await getTaxSummary(entity.id, year)
-        if (result.success) {
+        console.debug('getTaxSummary ->', result)
+        if (result && result.success) {
           setTaxSummary(result.data)
         } else {
-          setError(result.error)
+          setError(result?.error || 'Failed to load tax summary')
         }
       } else if (view === 'MONTHLY') {
         const result = await getMonthlySummary(entity.id, year)
-        if (result.success) {
+        console.debug('getMonthlySummary ->', result)
+        if (result && result.success) {
           setMonthlyData(result.data)
         } else {
-          setError(result.error)
+          setError(result?.error || 'Failed to load monthly summary')
         }
       }
     } catch (err) {
@@ -109,7 +114,16 @@ export default function AnalyticsTab() {
         {VIEWS.map(v => (
           <button
             key={v}
-            onClick={() => setView(v)}
+            onClick={() => {
+              // Clear previous view data and errors before loading new view
+              setError(null)
+              setIncomeStatement(null)
+              setBalanceSheet(null)
+              setCashFlow(null)
+              setTaxSummary(null)
+              setMonthlyData(null)
+              setView(v)
+            }}
             className={`px-4 py-2 font-medium transition ${
               view === v
                 ? 'border-b-2 border-blue-600 text-blue-600'
@@ -139,7 +153,7 @@ export default function AnalyticsTab() {
               <div className="flex justify-between py-2 border-b">
                 <span className="font-semibold">Total Income</span>
                 <span className="text-blue-600 font-bold">
-                  R {incomeStatement.totalIncome?.toFixed(2) || '0.00'}
+                  R {Number(incomeStatement.totalIncome ?? 0).toFixed(2)}
                 </span>
               </div>
 
@@ -150,7 +164,7 @@ export default function AnalyticsTab() {
                 {Object.entries(incomeStatement.incomeByClass || {}).map(([cls, val]) => (
                   <div key={cls} className="flex justify-between text-gray-600">
                     <span>{cls}</span>
-                    <span>R {val.toFixed(2)}</span>
+                    <span>R {Number(val ?? 0).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
@@ -158,7 +172,7 @@ export default function AnalyticsTab() {
               <div className="flex justify-between py-2 border-b border-t">
                 <span className="font-semibold">Total Expenses</span>
                 <span className="text-red-600 font-bold">
-                  R {incomeStatement.totalExpenses?.toFixed(2) || '0.00'}
+                  R {Number(incomeStatement.totalExpenses ?? 0).toFixed(2)}
                 </span>
               </div>
 
@@ -166,13 +180,13 @@ export default function AnalyticsTab() {
                 <div className="flex justify-between">
                   <span>Deductible Expenses:</span>
                   <span className="text-green-600">
-                    R {incomeStatement.deductibleExpenses?.toFixed(2) || '0.00'}
+                    R {Number(incomeStatement.deductibleExpenses ?? 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Non-Deductible Expenses:</span>
                   <span className="text-orange-600">
-                    R {incomeStatement.nonDeductibleExpenses?.toFixed(2) || '0.00'}
+                    R {Number(incomeStatement.nonDeductibleExpenses ?? 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -184,7 +198,7 @@ export default function AnalyticsTab() {
                 {Object.entries(incomeStatement.expenseByNature || {}).map(([nat, val]) => (
                   <div key={nat} className="flex justify-between text-gray-600">
                     <span>{nat}</span>
-                    <span>R {val.toFixed(2)}</span>
+                    <span>R {Number(val ?? 0).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
@@ -192,14 +206,14 @@ export default function AnalyticsTab() {
               <div className="flex justify-between py-2 border-y font-semibold bg-gray-50">
                 <span>Net Income</span>
                 <span className={incomeStatement.netIncome >= 0 ? 'text-green-600' : 'text-red-600'}>
-                  R {incomeStatement.netIncome?.toFixed(2) || '0.00'}
+                  R {Number(incomeStatement.netIncome ?? 0).toFixed(2)}
                 </span>
               </div>
 
               <div className="flex justify-between py-2 border-b">
                 <span>Taxable Income</span>
                 <span className="font-semibold">
-                  R {incomeStatement.taxableIncome?.toFixed(2) || '0.00'}
+                  R {Number(incomeStatement.taxableIncome ?? 0).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -218,14 +232,14 @@ export default function AnalyticsTab() {
                 {Object.entries(balanceSheet.assets || {}).map(([type, val]) => (
                   <div key={type} className="flex justify-between">
                     <span className="text-gray-700">{type}</span>
-                    <span className="font-semibold">R {val.toFixed(2)}</span>
+                    <span className="font-semibold">R {Number(val ?? 0).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
               <div className="flex justify-between py-2 border-t font-bold">
                 <span>Total Assets</span>
                 <span className="text-blue-600">
-                  R {balanceSheet.totalAssets?.toFixed(2) || '0.00'}
+                  R {Number(balanceSheet.totalAssets ?? 0).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -237,14 +251,14 @@ export default function AnalyticsTab() {
                 {Object.entries(balanceSheet.liabilities || {}).map(([type, val]) => (
                   <div key={type} className="flex justify-between">
                     <span className="text-gray-700">{type}</span>
-                    <span className="font-semibold">R {val.toFixed(2)}</span>
+                    <span className="font-semibold">R {Number(val ?? 0).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
               <div className="flex justify-between py-2 border-t font-bold">
                 <span>Total Liabilities</span>
                 <span className="text-red-600">
-                  R {balanceSheet.totalLiabilities?.toFixed(2) || '0.00'}
+                  R {Number(balanceSheet.totalLiabilities ?? 0).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -255,11 +269,11 @@ export default function AnalyticsTab() {
             <div className="flex justify-between items-center">
               <span className="font-semibold text-lg">Net Equity</span>
               <span className={`text-2xl font-bold ${balanceSheet.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                R {balanceSheet.equity?.toFixed(2) || '0.00'}
+                R {Number(balanceSheet.equity ?? 0).toFixed(2)}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Assets - Liabilities = {balanceSheet.totalAssets?.toFixed(2)} - {balanceSheet.totalLiabilities?.toFixed(2)}
+              Assets - Liabilities = {Number(balanceSheet.totalAssets ?? 0).toFixed(2)} - {Number(balanceSheet.totalLiabilities ?? 0).toFixed(2)}
             </p>
           </div>
         </div>
@@ -313,19 +327,19 @@ export default function AnalyticsTab() {
                 <div className="flex justify-between">
                   <span className="text-gray-700">Gross Income</span>
                   <span className="font-semibold">
-                    R {taxSummary.grossIncome?.toFixed(2) || '0.00'}
-                  </span>
+                      R {Number(taxSummary.grossIncome ?? 0).toFixed(2)}
+                    </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-700">Tax Exempt Income</span>
                   <span className="font-semibold text-green-600">
-                    R {taxSummary.taxExemptIncome?.toFixed(2) || '0.00'}
+                    R {Number(taxSummary.taxExemptIncome ?? 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between py-2 border-t border-b">
                   <span className="font-semibold">Taxable Income</span>
                   <span className="font-bold">
-                    R {taxSummary.taxableIncome?.toFixed(2) || '0.00'}
+                    R {Number(taxSummary.taxableIncome ?? 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -337,19 +351,19 @@ export default function AnalyticsTab() {
                 <div className="flex justify-between">
                   <span className="text-gray-700">Deductible Expenses</span>
                   <span className="font-semibold text-green-600">
-                    R {taxSummary.deductibleExpenses?.toFixed(2) || '0.00'}
+                    R {Number(taxSummary.deductibleExpenses ?? 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-700">Non-Deductible Exp.</span>
                   <span className="font-semibold text-red-600">
-                    R {taxSummary.nonDeductibleExpenses?.toFixed(2) || '0.00'}
+                    R {Number(taxSummary.nonDeductibleExpenses ?? 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between py-2 border-t border-b">
                   <span className="font-semibold">Total Expenses</span>
                   <span className="font-bold">
-                    R {(taxSummary.deductibleExpenses + taxSummary.nonDeductibleExpenses)?.toFixed(2) || '0.00'}
+                    R {Number((Number(taxSummary.deductibleExpenses ?? 0) + Number(taxSummary.nonDeductibleExpenses ?? 0))).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -361,17 +375,17 @@ export default function AnalyticsTab() {
               <p className="mb-2"><strong>Tax Base Calculation (SARS)</strong></p>
               <p className="flex justify-between">
                 <span>Taxable Income:</span>
-                <span>R {taxSummary.taxableIncome?.toFixed(2) || '0.00'}</span>
+                <span>R {Number(taxSummary.taxableIncome ?? 0).toFixed(2)}</span>
               </p>
               <p className="flex justify-between">
                 <span>Less: Deductible Expenses:</span>
-                <span>- R {taxSummary.deductibleExpenses?.toFixed(2) || '0.00'}</span>
+                <span>- R {Number(taxSummary.deductibleExpenses ?? 0).toFixed(2)}</span>
               </p>
             </div>
             <div className="flex justify-between font-bold text-lg border-t pt-3">
               <span>Effective Tax Base</span>
               <span className="text-blue-600">
-                R {taxSummary.effectiveTaxBase?.toFixed(2) || '0.00'}
+                R {Number(taxSummary.effectiveTaxBase ?? 0).toFixed(2)}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-3">
