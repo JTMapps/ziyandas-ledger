@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
-import { useEntity } from '../../context/EntityContext'
+import { supabase } from '../../../lib/supabase'
+import { useEntity } from '../../../context/EntityContext'
 
 const DEFAULT_CATEGORIES = [
   'Food',
