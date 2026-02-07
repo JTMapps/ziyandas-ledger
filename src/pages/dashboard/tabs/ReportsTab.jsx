@@ -7,7 +7,7 @@ import {
   getTaxSummary,
   getMonthlySummary
 } from '../../../services/analyticsService'
-import { getAuditTrail } from '../../../services/auditService'
+import { getTableAuditLog } from '../../../services/auditService'
 
 const REPORT_TYPES = [
   { id: 'INCOME_STATEMENT', label: 'Income Statement', icon: '📊' },
@@ -45,29 +45,55 @@ export default function ReportsTab() {
       let data = null
 
       if (selectedReport === 'INCOME_STATEMENT') {
-        const result = await getIncomeStatement(entity.id, startDate, endDate)
-        data = result.success ? result.data : null
+        try {
+          const result = await getIncomeStatement(entity.id, startDate, endDate)
+          data = result?.success ? result.data : null
+        } catch (e) {
+          console.error('Error loading income statement:', e)
+          setError('Failed to load income statement: ' + e.message)
+        }
       } else if (selectedReport === 'BALANCE_SHEET') {
-        const result = await getBalanceSheet(entity.id)
-        data = result.success ? result.data : null
+        try {
+          const result = await getBalanceSheet(entity.id)
+          data = result?.success ? result.data : { assets: {}, liabilities: {}, totalAssets: 0, totalLiabilities: 0, equity: 0 }
+        } catch (e) {
+          console.error('Error loading balance sheet:', e)
+          data = { assets: {}, liabilities: {}, totalAssets: 0, totalLiabilities: 0, equity: 0 }
+        }
       } else if (selectedReport === 'TAX_REPORT') {
-        const result = await getTaxSummary(entity.id, year)
-        data = result.success ? result.data : null
+        try {
+          const result = await getTaxSummary(entity.id, year)
+          data = result?.success ? result.data : { grossIncome: 0, taxableIncome: 0, taxExemptIncome: 0, deductibleExpenses: 0, nonDeductibleExpenses: 0, effectiveTaxBase: 0 }
+        } catch (e) {
+          console.error('Error loading tax report:', e)
+          data = { grossIncome: 0, taxableIncome: 0, taxExemptIncome: 0, deductibleExpenses: 0, nonDeductibleExpenses: 0, effectiveTaxBase: 0 }
+        }
       } else if (selectedReport === 'CASH_FLOW_STATEMENT') {
-        const result = await getCashFlow(entity.id, startDate, endDate, 'DAILY')
-        data = result.success ? result.data : null
+        try {
+          const result = await getCashFlow(entity.id, startDate, endDate, 'DAILY')
+          data = result?.success ? result.data : []
+        } catch (e) {
+          console.error('Error loading cash flow:', e)
+          data = []
+        }
       } else if (selectedReport === 'AUDIT_TRAIL') {
-        const result = await getAuditTrail(entity.id, { limit: 100 })
-        data = result.success ? result.data : null
+        try {
+          const result = await getTableAuditLog('economic_events', { limit: 100 })
+          data = result?.success ? result.data : []
+        } catch (e) {
+          console.error('Error loading audit trail:', e)
+          data = []
+        }
       }
 
-      if (data) {
+      if (data !== null) {
         setReportData(data)
-      } else {
+      } else if (!error) {
         setError('Failed to generate report')
       }
     } catch (err) {
-      setError(err.message)
+      console.error('Report generation error:', err)
+      setError(err.message || 'Failed to generate report')
     }
 
     setLoading(false)
@@ -193,6 +219,10 @@ export default function ReportsTab() {
 
   const currentReport = REPORT_TYPES.find(r => r.id === selectedReport)
 
+  const incomeEntries = Object.entries(reportData?.incomeByClass || {})
+  const expenseEntries = Object.entries(reportData?.expenseByNature || {})
+  const cashFlowRows = Array.isArray(reportData) ? reportData : []
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
@@ -280,7 +310,7 @@ export default function ReportsTab() {
           {selectedReport === 'INCOME_STATEMENT' && (
             <div className="bg-white border rounded p-8 space-y-4">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">{entity.name}</h2>
+                <h2 className="text-2xl font-bold">{entity?.name || 'Entity'}</h2>
                 <p className="text-gray-600">Income Statement</p>
                 <p className="text-sm text-gray-500">
                   For the month of {new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
@@ -293,45 +323,45 @@ export default function ReportsTab() {
                     <td className="py-2 font-semibold">Income:</td>
                     <td className="text-right"></td>
                   </tr>
-                  {Object.entries(reportData.incomeByClass || {}).map(([cls, val]) => (
+                  {incomeEntries.map(([cls, val]) => (
                     <tr key={cls} className="border-b">
                       <td className="py-2 pl-4">{cls}</td>
                       <td className="text-right font-semibold">
-                        R {val.toFixed(2)}
+                        R {(val || 0).toFixed(2)}
                       </td>
                     </tr>
                   ))}
                   <tr className="border-b-2">
                     <td className="py-2 font-semibold">Total Income</td>
-                    <td className="text-right font-bold">R {reportData.totalIncome.toFixed(2)}</td>
+                    <td className="text-right font-bold">R {(reportData?.totalIncome || 0).toFixed(2)}</td>
                   </tr>
 
                   <tr className="border-b-2">
                     <td className="py-2 font-semibold">Expenses:</td>
                     <td className="text-right"></td>
                   </tr>
-                  {Object.entries(reportData.expenseByNature || {}).map(([nature, val]) => (
+                  {expenseEntries.map(([nature, val]) => (
                     <tr key={nature} className="border-b">
                       <td className="py-2 pl-4">{nature}</td>
                       <td className="text-right font-semibold">
-                        R {val.toFixed(2)}
+                        R {(val || 0).toFixed(2)}
                       </td>
                     </tr>
                   ))}
                   <tr className="border-b">
                     <td className="py-2 pl-4 text-sm text-gray-600">Deductible</td>
                     <td className="text-right text-sm text-gray-600">
-                      R {reportData.deductibleExpenses.toFixed(2)}
+                      R {(reportData?.deductibleExpenses || 0).toFixed(2)}
                     </td>
                   </tr>
                   <tr className="border-b-2">
                     <td className="py-2 font-semibold">Total Expenses</td>
-                    <td className="text-right font-bold">R {reportData.totalExpenses.toFixed(2)}</td>
+                    <td className="text-right font-bold">R {(reportData?.totalExpenses || 0).toFixed(2)}</td>
                   </tr>
 
                   <tr className="bg-gray-100">
                     <td className="py-2 font-bold">Net Income</td>
-                    <td className="text-right font-bold">R {reportData.netIncome.toFixed(2)}</td>
+                    <td className="text-right font-bold">R {(reportData?.netIncome || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -341,7 +371,7 @@ export default function ReportsTab() {
           {selectedReport === 'BALANCE_SHEET' && (
             <div className="bg-white border rounded p-8 space-y-4">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">{entity.name}</h2>
+                <h2 className="text-2xl font-bold">{entity?.name || 'Entity'}</h2>
                 <p className="text-gray-600">Balance Sheet</p>
                 <p className="text-sm text-gray-500">As at {new Date().toISOString().split('T')[0]}</p>
               </div>
@@ -352,15 +382,15 @@ export default function ReportsTab() {
                     <td className="py-2 font-bold text-lg">Assets</td>
                     <td className="text-right"></td>
                   </tr>
-                  {Object.entries(reportData.assets || {}).map(([type, val]) => (
+                  {Object.entries(reportData?.assets || {}).map(([type, val]) => (
                     <tr key={type} className="border-b">
                       <td className="py-2 pl-4">{type}</td>
-                      <td className="text-right">R {val.toFixed(2)}</td>
+                      <td className="text-right">R {(val || 0).toFixed(2)}</td>
                     </tr>
                   ))}
                   <tr className="bg-blue-50 font-bold">
                     <td className="py-2">Total Assets</td>
-                    <td className="text-right">R {reportData.totalAssets.toFixed(2)}</td>
+                    <td className="text-right">R {(reportData?.totalAssets || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -375,20 +405,20 @@ export default function ReportsTab() {
                     <td className="py-2 font-semibold">Liabilities:</td>
                     <td className="text-right"></td>
                   </tr>
-                  {Object.entries(reportData.liabilities || {}).map(([type, val]) => (
+                  {Object.entries(reportData?.liabilities || {}).map(([type, val]) => (
                     <tr key={type} className="border-b">
                       <td className="py-2 pl-4">{type}</td>
-                      <td className="text-right">R {val.toFixed(2)}</td>
+                      <td className="text-right">R {(val || 0).toFixed(2)}</td>
                     </tr>
                   ))}
                   <tr className="bg-red-50 font-bold">
                     <td className="py-2">Total Liabilities</td>
-                    <td className="text-right">R {reportData.totalLiabilities.toFixed(2)}</td>
+                    <td className="text-right">R {(reportData?.totalLiabilities || 0).toFixed(2)}</td>
                   </tr>
 
                   <tr className="border-t-2 bg-green-50 font-bold text-lg">
                     <td className="py-3">Net Equity</td>
-                    <td className="text-right">R {reportData.equity.toFixed(2)}</td>
+                    <td className="text-right">R {(reportData?.equity || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -398,7 +428,7 @@ export default function ReportsTab() {
           {selectedReport === 'TAX_REPORT' && (
             <div className="bg-white border rounded p-8 space-y-4">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">{entity.name}</h2>
+                <h2 className="text-2xl font-bold">{entity?.name || 'Entity'}</h2>
                 <p className="text-gray-600">Tax Compliance Report (SARS)</p>
                 <p className="text-sm text-gray-500">Tax Year {year}</p>
               </div>
@@ -410,15 +440,15 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="border-b">
                         <td className="py-2">Gross Income</td>
-                        <td className="text-right">R {reportData.grossIncome.toFixed(2)}</td>
+                        <td className="text-right">R {(reportData?.grossIncome || 0).toFixed(2)}</td>
                       </tr>
                       <tr className="border-b">
                         <td className="py-2">Tax Exempt Income</td>
-                        <td className="text-right text-green-600">- R {reportData.taxExemptIncome.toFixed(2)}</td>
+                        <td className="text-right text-green-600">- R {(reportData?.taxExemptIncome || 0).toFixed(2)}</td>
                       </tr>
                       <tr className="bg-gray-100 font-bold border-b">
                         <td className="py-2">Taxable Income</td>
-                        <td className="text-right">R {reportData.taxableIncome.toFixed(2)}</td>
+                        <td className="text-right">R {(reportData?.taxableIncome || 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -430,11 +460,11 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="border-b">
                         <td className="py-2">Deductible Expenses</td>
-                        <td className="text-right text-green-600">R {reportData.deductibleExpenses.toFixed(2)}</td>
+                        <td className="text-right text-green-600">R {(reportData?.deductibleExpenses || 0).toFixed(2)}</td>
                       </tr>
                       <tr className="border-b">
                         <td className="py-2">Non-Deductible Expenses</td>
-                        <td className="text-right text-red-600">R {reportData.nonDeductibleExpenses.toFixed(2)}</td>
+                        <td className="text-right text-red-600">R {(reportData?.nonDeductibleExpenses || 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -445,12 +475,12 @@ export default function ReportsTab() {
                     <tbody>
                       <tr className="font-bold text-lg">
                         <td className="py-2">Effective Tax Base</td>
-                        <td className="text-right">R {reportData.effectiveTaxBase.toFixed(2)}</td>
+                        <td className="text-right">R {(reportData?.effectiveTaxBase || 0).toFixed(2)}</td>
                       </tr>
                       <tr>
                         <td className="py-2 text-sm">@ 28% Corporate Tax Rate</td>
                         <td className="text-right text-sm font-semibold">
-                          R {(reportData.effectiveTaxBase * 0.28).toFixed(2)}
+                          R {(((reportData?.effectiveTaxBase || 0) * 0.28)).toFixed(2)}
                         </td>
                       </tr>
                     </tbody>
@@ -468,7 +498,7 @@ export default function ReportsTab() {
           {selectedReport === 'CASH_FLOW_STATEMENT' && (
             <div className="bg-white border rounded p-8">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">{entity.name}</h2>
+                <h2 className="text-2xl font-bold">{entity?.name || 'Entity'}</h2>
                 <p className="text-gray-600">Cash Flow Statement</p>
                 <p className="text-sm text-gray-500">
                   For the month of {new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
@@ -486,7 +516,7 @@ export default function ReportsTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(reportData || []).map((row, idx) => (
+                  {cashFlowRows.map((row, idx) => (
                     <tr key={idx} className={idx % 2 ? 'bg-gray-50' : ''}>
                       <td className="py-2">{row?.date || ''}</td>
                       <td className="text-right text-green-600">R {(row?.inflow || 0).toFixed(2)}</td>
@@ -503,7 +533,7 @@ export default function ReportsTab() {
           {selectedReport === 'AUDIT_TRAIL' && (
             <div className="bg-white border rounded p-8">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">{entity.name}</h2>
+                <h2 className="text-2xl font-bold">{entity?.name || 'Entity'}</h2>
                 <p className="text-gray-600">Audit Trail Report</p>
                 <p className="text-sm text-gray-500">Recent Activity Log</p>
               </div>
