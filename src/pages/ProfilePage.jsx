@@ -1,51 +1,69 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, getCurrentUser } from '../lib/supabase'
+import { getMyEntities, deleteEntity } from '../services/entityService'
+import { eventEmitter } from '../lib/eventEmitter'
 
 export default function ProfilePage() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [entities, setEntities] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    async function loadProfile() {
-      // Get current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user) {
-        setUser(user)
-
-        // Load entities
-        const { data } = await supabase
-          .from('entities')
-          .select('*')
-          .eq('created_by', user.id)
-          .order('created_at', { ascending: false })
-
-        setEntities(data || [])
-      }
-
-      setLoading(false)
-    }
-
     loadProfile()
   }, [])
 
-  async function handleDeleteEntity(entityId) {
+  // Subscribe to entity creation/deletion events
+  useEffect(() => {
+    const unsubCreate = eventEmitter.on('ENTITY_CREATED', () => loadProfile())
+    const unsubDelete = eventEmitter.on('ENTITY_DELETED', () => loadProfile())
+    return () => {
+      unsubCreate()
+      unsubDelete()
+    }
+  }, [])
+
+  async function loadProfile() {
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Get current user
+      const { user: currentUser, error: userError } = await getCurrentUser()
+      if (userError) throw userError
+
+      if (currentUser) {
+        setUser(currentUser)
+
+        // Load entities using service
+        const result = await getMyEntities()
+        if (result.success) {
+          setEntities(result.data)
+        } else {
+          setError(result.error)
+        }
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load profile')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDeleteEntity(entityId, e) {
+    e.stopPropagation()
+
     if (!confirm('Are you sure you want to delete this entity? This cannot be undone.')) {
       return
     }
 
-    const { error } = await supabase
-      .from('entities')
-      .delete()
-      .eq('id', entityId)
-
-    if (!error) {
+    const result = await deleteEntity(entityId)
+    if (result.success) {
       setEntities(entities.filter(e => e.id !== entityId))
+    } else {
+      setError(result.error)
     }
   }
 
@@ -61,6 +79,12 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-2xl mx-auto">
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
+
         {/* User Info */}
         <div className="bg-white rounded border p-6 mb-8">
           <h1 className="text-2xl font-bold mb-4">Profile</h1>
@@ -91,7 +115,7 @@ export default function ProfilePage() {
             <h2 className="text-xl font-bold">My Entities</h2>
             <button
               onClick={() => navigate('/entities/new')}
-              className="bg-black text-white px-4 py-2 rounded text-sm hover:bg-gray-800"
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
             >
               + Create Entity
             </button>
@@ -121,10 +145,7 @@ export default function ProfilePage() {
 
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
                     <button
-                      onClick={e => {
-                        e.stopPropagation()
-                        handleDeleteEntity(entity.id)
-                      }}
+                      onClick={(e) => handleDeleteEntity(entity.id, e)}
                       className="text-red-600 hover:text-red-700 text-sm underline"
                     >
                       Delete

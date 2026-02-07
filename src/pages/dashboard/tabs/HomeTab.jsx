@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
 import { useEntity } from '../../../context/EntityContext'
+import { getTotalIncome } from '../../../services/incomeService'
+import { getTotalExpense } from '../../../services/expenseService'
+import { queryEventsByEntity } from '../../../services/eventService'
+import { eventEmitter } from '../../../lib/eventEmitter'
 
 export default function HomeTab() {
   const { entity } = useEntity()
@@ -9,83 +12,84 @@ export default function HomeTab() {
     lastTransaction: null,
     monthlyIncome: 0,
     monthlyExpenses: 0,
+    totalIncome: 0,
+    totalExpenses: 0
   })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!entity) return
 
-    async function loadSummary() {
-      setLoading(true)
+    loadSummary()
+  }, [entity])
 
+  // Subscribe to income/expense changes
+  useEffect(() => {
+    const unsubIncome = eventEmitter.on('INCOME_ADDED', loadSummary)
+    const unsubExpense = eventEmitter.on('EXPENSE_ADDED', loadSummary)
+    return () => {
+      unsubIncome()
+      unsubExpense()
+    }
+  }, [entity])
+
+  async function loadSummary() {
+    if (!entity) return
+    setLoading(true)
+
+    try {
       const now = new Date()
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
         .toISOString()
         .split('T')[0]
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        .toISOString()
+        .split('T')[0]
 
-      // Total income (all time)
-      const { data: incomeData } = await supabase
-        .from('income_entries')
-        .select('amount_net')
-        .eq('entity_id', entity.id)
+      // Get total income and expenses all time
+      const incomeResult = await getTotalIncome(entity.id)
+      const expenseResult = await getTotalExpense(entity.id)
 
-      // Total expenses (all time)
-      const { data: expenseData } = await supabase
-        .from('expense_entries')
-        .select('amount')
-        .eq('entity_id', entity.id)
+      // Get this month's income and expenses
+      const monthlyIncomeResult = await getTotalIncome(entity.id, monthStart, monthEnd)
+      const monthlyExpenseResult = await getTotalExpense(entity.id, monthStart, monthEnd)
 
-      // This month income
-      const { data: monthlyIncomeData } = await supabase
-        .from('income_entries')
-        .select('amount_net')
-        .eq('entity_id', entity.id)
-        .gte('date_received', monthStart)
+      // Get last transaction
+      const eventsResult = await queryEventsByEntity(entity.id, {
+        limit: 1
+      })
 
-      // This month expenses
-      const { data: monthlyExpenseData } = await supabase
-        .from('expense_entries')
-        .select('amount')
-        .eq('entity_id', entity.id)
-        .gte('date_spent', monthStart)
+      const lastEvent = eventsResult.data?.[0]
+      let lastTransaction = null
+      if (lastEvent) {
+        const eventType = lastEvent.event_type
+        const isIncome = eventType === 'REVENUE_EARNED'
+        lastTransaction = {
+          id: lastEvent.id,
+          type: isIncome ? 'income' : 'expense',
+          amount: isIncome ? monthlyIncomeResult.total : monthlyExpenseResult.total,
+          description: lastEvent.description || eventType,
+          date: lastEvent.event_date
+        }
+      }
 
-      // Last transaction
-      const { data: allTransactions } = await supabase
-        .from('income_entries')
-        .select('id, amount_net as amount, description, date_received as date, type:cast(\'income\' as text)')
-        .eq('entity_id', entity.id)
-        .order('date_received', { ascending: false })
-        .limit(1)
-
-      const { data: expenseTransactions } = await supabase
-        .from('expense_entries')
-        .select('id, amount, category as description, date_spent as date, type:cast(\'expense\' as text)')
-        .eq('entity_id', entity.id)
-        .order('date_spent', { ascending: false })
-        .limit(1)
-
-      const allTx = [
-        ...(allTransactions || []),
-        ...(expenseTransactions || []),
-      ].sort((a, b) => new Date(b.date) - new Date(a.date))[0]
-
-      const totalIncome = incomeData?.reduce((sum, i) => sum + Number(i.amount_net), 0) || 0
-      const totalExpenses = expenseData?.reduce((sum, e) => sum + Number(e.amount), 0) || 0
-      const monthlyIncome = monthlyIncomeData?.reduce((sum, i) => sum + Number(i.amount_net), 0) || 0
-      const monthlyExpenses = monthlyExpenseData?.reduce((sum, e) => sum + Number(e.amount), 0) || 0
+      const totalIncome = incomeResult.total || 0
+      const totalExpenses = expenseResult.total || 0
 
       setSummary({
         cashBalance: totalIncome - totalExpenses,
-        lastTransaction: allTx,
-        monthlyIncome,
-        monthlyExpenses,
+        lastTransaction,
+        monthlyIncome: monthlyIncomeResult.total || 0,
+        monthlyExpenses: monthlyExpenseResult.total || 0,
+        totalIncome,
+        totalExpenses
       })
-
+    } catch (error) {
+      console.error('Error loading summary:', error)
+    } finally {
       setLoading(false)
     }
-
-    loadSummary()
-  }, [entity])
+  }
 
   if (loading) {
     return <div className="p-6">Loading summary…</div>
@@ -94,57 +98,70 @@ export default function HomeTab() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-2">{entity.name}</h1>
-        <p className="text-gray-600 text-sm">{entity.type} Entity</p>
+        <h1 className="text-2xl font-bold mb-2">{entity?.name || 'Unknown Entity'}</h1>
+        <p className="text-gray-600 text-sm">{entity?.type || 'Unknown'} Entity</p>
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="bg-white border rounded p-4">
           <p className="text-gray-600 text-sm mb-1">Cash Balance</p>
-          <p className={`text-2xl font-bold ${summary.cashBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            ${summary.cashBalance.toFixed(2)}
+          <p className={`text-3xl font-bold ${(summary?.cashBalance || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            R {(summary?.cashBalance || 0).toFixed(2)}
+          </p>
+          <p className="text-xs text-gray-500 mt-2">
+            Income: R {(summary?.totalIncome || 0).toFixed(2)} | Expenses: R {(summary?.totalExpenses || 0).toFixed(2)}
           </p>
         </div>
 
         <div className="bg-white border rounded p-4">
-          <p className="text-gray-600 text-sm mb-1">This Month Income</p>
-          <p className="text-2xl font-bold text-blue-600">
-            ${summary.monthlyIncome.toFixed(2)}
-          </p>
-        </div>
-
-        <div className="bg-white border rounded p-4">
-          <p className="text-gray-600 text-sm mb-1">This Month Expenses</p>
-          <p className="text-2xl font-bold text-orange-600">
-            ${summary.monthlyExpenses.toFixed(2)}
-          </p>
+          <p className="text-gray-600 text-sm mb-1">This Month</p>
+          <div className="space-y-1">
+            <p className="text-lg font-semibold">
+              <span className="text-green-600">+R {(summary?.monthlyIncome || 0).toFixed(2)}</span>
+            </p>
+            <p className="text-lg font-semibold">
+              <span className="text-orange-600">-R {(summary?.monthlyExpenses || 0).toFixed(2)}</span>
+            </p>
+            <p className="text-sm font-semibold mt-2">
+              <span className={(summary?.monthlyIncome || 0) - (summary?.monthlyExpenses || 0) >= 0 ? 'text-green-600' : 'text-red-600'}>
+                = R {(((summary?.monthlyIncome || 0) - (summary?.monthlyExpenses || 0))).toFixed(2)}
+              </span>
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Last Transaction */}
-      {summary.lastTransaction && (
+      {summary?.lastTransaction && (
         <div className="bg-white border rounded p-4">
           <h3 className="font-semibold mb-3">Last Transaction</h3>
           <div className="space-y-2 text-sm">
             <p>
               <strong>Type:</strong>{' '}
-              <span className={summary.lastTransaction.type === 'income' ? 'text-green-600' : 'text-orange-600'}>
-                {summary.lastTransaction.type === 'income' ? 'Income' : 'Expense'}
+              <span className={summary?.lastTransaction?.type === 'income' ? 'text-green-600' : 'text-orange-600'}>
+                {summary?.lastTransaction?.type === 'income' ? 'Income' : 'Expense'}
               </span>
             </p>
             <p>
-              <strong>Amount:</strong> ${summary.lastTransaction.amount.toFixed(2)}
+              <strong>Amount:</strong> R {(summary?.lastTransaction?.amount || 0).toFixed(2)}
             </p>
             <p>
-              <strong>Description:</strong> {summary.lastTransaction.description}
+              <strong>Description:</strong> {summary?.lastTransaction?.description || 'N/A'}
             </p>
             <p className="text-gray-500">
-              {new Date(summary.lastTransaction.date).toLocaleDateString()}
+              {new Date(summary?.lastTransaction?.date || new Date()).toLocaleDateString()}
             </p>
           </div>
         </div>
       )}
+
+      {/* Info */}
+      <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm">
+        <p className="text-blue-900">
+          <strong>Event-Driven Ledger:</strong> All transactions are recorded as immutable economic events with full audit trail.
+        </p>
+      </div>
     </div>
   )
 }

@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
 import { useEntity } from '../../../context/EntityContext'
+import { addExpense, getExpenseByEntity, getExpensesByCategory } from '../../../services/expenseService'
+import { eventEmitter } from '../../../lib/eventEmitter'
 
 const DEFAULT_CATEGORIES = [
-  'Food',
-  'Transport',
-  'Medical',
-  'Clothing',
-  'Business Equipment',
-  'Education',
-  'Housing',
-  'Travel',
-  'Donations',
-  'Debt Payment',
-  'Other',
+  'OFFICE_SUPPLIES',
+  'TRAVEL',
+  'MEALS',
+  'UTILITIES',
+  'PROFESSIONAL_FEES',
+  'VEHICLE_EXPENSES',
+  'RENT',
+  'INSURANCE',
+  'EQUIPMENT',
+  'OTHER'
 ]
 
 export default function ExpensesTab() {
@@ -21,10 +21,11 @@ export default function ExpensesTab() {
 
   const [entries, setEntries] = useState([])
   const [amount, setAmount] = useState('')
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES)
   const [category, setCategory] = useState(DEFAULT_CATEGORIES[0])
   const [description, setDescription] = useState('')
+  const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     if (entity) {
@@ -32,82 +33,51 @@ export default function ExpensesTab() {
     }
   }, [entity])
 
+  // Subscribe to expense added events
   useEffect(() => {
-    async function loadCategories() {
-      // Try RPC for enum values first
-      try {
-        const { data, error } = await supabase.rpc('get_enum_values', { type_name: 'expense_category' })
-        if (!error && data && data.length > 0) {
-          const vals = data.map(d => d.value)
-          setCategories(vals)
-          setCategory(vals[0])
-          return
-        }
-      } catch (e) {
-        // fallthrough
-      }
-
-      // Fallback: try to derive from existing expense entries
-      try {
-        const { data } = await supabase
-          .from('expense_entries')
-          .select('category')
-          .neq('category', null)
-          .order('category')
-
-        if (data && data.length > 0) {
-          const unique = Array.from(new Set(data.map(d => d.category))).sort()
-          setCategories(unique)
-          setCategory(unique[0])
-          return
-        }
-      } catch (e) {
-        // fallthrough to defaults
-      }
-
-      setCategories(DEFAULT_CATEGORIES)
-      setCategory(DEFAULT_CATEGORIES[0])
-    }
-
-    loadCategories()
-  }, [])
+    const unsubscribe = eventEmitter.on('EXPENSE_ADDED', () => {
+      loadExpenses()
+    })
+    return () => unsubscribe()
+  }, [entity])
 
   async function loadExpenses() {
-    const { data, error } = await supabase
-      .from('expense_entries')
-      .select('*')
-      .eq('entity_id', entity.id)
-      .order('date_spent', { ascending: false })
-
-    if (!error) {
-      setEntries(data || [])
+    if (!entity) return
+    
+    const result = await getExpenseByEntity(entity.id, { limit: 100 })
+    if (result.success) {
+      setEntries(result.data)
+      setError(null)
+    } else {
+      setError(result.error)
     }
   }
 
-  async function addExpense(e) {
+  async function handleAddExpense(e) {
     e.preventDefault()
     setLoading(true)
+    setError(null)
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    const { error } = await supabase.from('expense_entries').insert({
-      user_id: user.id,
-      entity_id: entity.id,
-      amount,
+    const result = await addExpense({
+      entityId: entity.id,
+      dateSpent: new Date().toISOString().split('T')[0],
+      amount: parseFloat(amount),
       category,
-      description,
-      date_spent: new Date().toISOString().split('T')[0],
+      isTaxDeductible,
+      description: description || category,
+      deductionTiming: isTaxDeductible ? 'IMMEDIATE' : 'NONE'
     })
 
     setLoading(false)
-    setAmount('')
-    setDescription('')
-    setCategory(categories?.[0] || DEFAULT_CATEGORIES[0])
 
-    if (!error) {
-      loadExpenses()
+    if (result.success) {
+      setAmount('')
+      setCategory(DEFAULT_CATEGORIES[0])
+      setDescription('')
+      setIsTaxDeductible(false)
+      // loadExpenses will be called via EXPENSE_ADDED event listener
+    } else {
+      setError(result.error)
     }
   }
 
@@ -121,57 +91,100 @@ export default function ExpensesTab() {
         Expenses — {entity.name}
       </h1>
 
-      <form onSubmit={addExpense} className="flex gap-2 mb-6">
-        <input
-          type="number"
-          required
-          placeholder="Amount"
-          className="border p-2"
-          value={amount}
-          onChange={e => setAmount(e.target.value)}
-        />
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+      )}
 
-        <select
-          className="border p-2"
-          value={category}
-          onChange={e => setCategory(e.target.value)}
-        >
-          {categories.map(cat => (
-            <option key={cat} value={cat}>
-              {cat}
-            </option>
-          ))}
-        </select>
+      <form onSubmit={handleAddExpense} className="space-y-4 mb-6 border rounded p-4 bg-gray-50">
+        <div className="grid grid-cols-2 gap-4">
+          <input
+            type="number"
+            required
+            placeholder="Amount (ZAR)"
+            className="border p-2 rounded"
+            step="0.01"
+            min="0"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+          />
+
+          <select
+            className="border p-2 rounded"
+            value={category}
+            onChange={e => setCategory(e.target.value)}
+          >
+            {DEFAULT_CATEGORIES.map(cat => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <input
           type="text"
-          placeholder="Description"
-          className="border p-2 flex-1"
+          placeholder="Description (optional)"
+          className="border p-2 rounded w-full"
           value={description}
           onChange={e => setDescription(e.target.value)}
         />
 
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isTaxDeductible}
+            onChange={e => setIsTaxDeductible(e.target.checked)}
+            className="rounded"
+          />
+          <span>Tax Deductible</span>
+        </label>
+
         <button
           type="submit"
           disabled={loading}
-          className="bg-black text-white px-4"
+          className="bg-blue-600 text-white px-4 py-2 rounded disabled:bg-gray-400 w-full"
         >
-          {loading ? 'Adding…' : 'Add'}
+          {loading ? 'Adding…' : 'Add Expense'}
         </button>
       </form>
 
-      <ul className="space-y-2">
-        {entries.map(entry => (
-          <li key={entry.id} className="border p-2 rounded">
-            <div className="font-medium">
-              {entry.amount} — {entry.category}
-            </div>
-            <div className="text-sm text-gray-600">
-              {entry.description}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="space-y-2">
+        <h2 className="font-semibold text-lg">Recent Expenses</h2>
+        {(entries || []).length === 0 ? (
+          <p className="text-gray-500">No expense entries yet</p>
+        ) : (
+          <ul className="space-y-2">
+            {(entries || []).map(({ event, recognition }) => (
+              <li key={event?.id || Math.random()} className="border p-4 rounded hover:bg-gray-50 transition">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-semibold">
+                      R {(recognition?.amount || 0).toFixed(2)}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {recognition?.expense_nature || 'OTHER'} • {event?.event_date || 'N/A'}
+                    </div>
+                    {event?.description && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        {event.description}
+                      </div>
+                    )}
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    recognition?.deductible 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-orange-100 text-orange-800'
+                  }`}>
+                    {recognition?.deductible ? 'Deductible' : 'Non-Deductible'}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
