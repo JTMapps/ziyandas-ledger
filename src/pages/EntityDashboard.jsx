@@ -5,11 +5,11 @@ import { NavLink } from 'react-router-dom'
 
 import HomeTab from './dashboard/tabs/HomeTab'
 import IncomeTab from './dashboard/tabs/IncomeOverview'
-import ExpensesTab from './dashboard/tabs/ExpensesTab'
-import AssetsTab from './dashboard/tabs/AssetsTab'
-import LiabilitiesTab from './dashboard/tabs/LiabilitiesTab'
+import ExpensesTab from './dashboard/tabs/ExpensesOverview'
+import AssetsTab from './dashboard/tabs/AssetsOverview'
+import LiabilitiesTab from './dashboard/tabs/LiabilitiesOverview'
 import AnalyticsTab from './dashboard/tabs/AnalyticsTab'
-import ReportsTab from './dashboard/tabs/ReportsTab'
+import ReportsTab from './dashboard/tabs/ReportsOverview'
 import IncomeOverview from './dashboard/tabs/IncomeOverview'
 
 export default function EntityDashboard() {
@@ -53,11 +53,11 @@ export default function EntityDashboard() {
         <Routes>
           <Route index element={<HomeTab />} />
           <Route path="income" element={<IncomeOverview />} />
-          <Route path="expenses" element={<ExpensesTab />} />
-          <Route path="assets" element={<AssetsTab />} />
-          <Route path="liabilities" element={<LiabilitiesTab />} />
-          <Route path="analytics" element={<AnalyticsTab />} />
-          <Route path="reports" element={<ReportsTab />} />
+          <Route path="expenses" element={<ExpensesOverview />} />
+          <Route path="assets" element={<AssetsOverview />} />
+          <Route path="liabilities" element={<LiabilitiesOverview />} />
+          <Route path="analytics" element={<AnalyticsOverview />} />
+          <Route path="reports" element={<ReportsOverview />} />
         </Routes>
       </DashboardLayout>
     </EntityProvider>
