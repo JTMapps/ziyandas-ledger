@@ -4,12 +4,13 @@ import DashboardLayout from '../components/layout/DashboardLayout'
 import { NavLink } from 'react-router-dom'
 
 import HomeTab from './dashboard/tabs/HomeTab'
-import IncomeTab from './dashboard/tabs/IncomeTab'
+import IncomeTab from './dashboard/tabs/IncomeOverview'
 import ExpensesTab from './dashboard/tabs/ExpensesTab'
 import AssetsTab from './dashboard/tabs/AssetsTab'
 import LiabilitiesTab from './dashboard/tabs/LiabilitiesTab'
 import AnalyticsTab from './dashboard/tabs/AnalyticsTab'
 import ReportsTab from './dashboard/tabs/ReportsTab'
+import IncomeOverview from './dashboard/tabs/IncomeOverview'
 
 export default function EntityDashboard() {
   const { entityId } = useParams()
@@ -51,7 +52,7 @@ export default function EntityDashboard() {
         {/* Tab Content */}
         <Routes>
           <Route index element={<HomeTab />} />
-          <Route path="income" element={<IncomeTab />} />
+          <Route path="income" element={<IncomeOverview />} />
           <Route path="expenses" element={<ExpensesTab />} />
           <Route path="assets" element={<AssetsTab />} />
           <Route path="liabilities" element={<LiabilitiesTab />} />

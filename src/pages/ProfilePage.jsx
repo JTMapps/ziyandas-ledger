@@ -1,27 +1,35 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, getCurrentUser } from '../lib/supabase'
-import { getMyEntities, deleteEntity } from '../services/entityService'
+import { getMyEntities, getEntitySnapshot } from '../services/entityService'
 import { eventEmitter } from '../lib/eventEmitter'
 
 export default function ProfilePage() {
   const navigate = useNavigate()
+
   const [user, setUser] = useState(null)
   const [entities, setEntities] = useState([])
+  const [entitySnapshots, setEntitySnapshots] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  /* ============================================================
+     LOAD PROFILE
+  ============================================================ */
 
   useEffect(() => {
     loadProfile()
   }, [])
 
-  // Subscribe to entity creation/deletion events
   useEffect(() => {
-    const unsubCreate = eventEmitter.on('ENTITY_CREATED', () => loadProfile())
-    const unsubDelete = eventEmitter.on('ENTITY_DELETED', () => loadProfile())
+    const reload = () => loadProfile()
+
+    eventEmitter.on('ENTITY_CREATED', reload)
+    eventEmitter.on('ECONOMIC_EVENT_RECORDED', reload)
+
     return () => {
-      unsubCreate()
-      unsubDelete()
+      eventEmitter.off('ENTITY_CREATED', reload)
+      eventEmitter.off('ECONOMIC_EVENT_RECORDED', reload)
     }
   }, [])
 
@@ -30,40 +38,33 @@ export default function ProfilePage() {
     setError(null)
 
     try {
-      // Get current user
       const { user: currentUser, error: userError } = await getCurrentUser()
       if (userError) throw userError
+      if (!currentUser) return
 
-      if (currentUser) {
-        setUser(currentUser)
+      setUser(currentUser)
 
-        // Load entities using service
-        const result = await getMyEntities()
-        if (result.success) {
-          setEntities(result.data)
-        } else {
-          setError(result.error)
+      const result = await getMyEntities()
+      if (!result.success) throw new Error(result.error)
+
+      const entitiesData = result.data || []
+      setEntities(entitiesData)
+
+      const snapshots = {}
+
+      for (const entity of entitiesData) {
+        const snapResult = await getEntitySnapshot(entity.id)
+        if (snapResult.success) {
+          snapshots[entity.id] = snapResult.snapshot
         }
       }
+
+      setEntitySnapshots(snapshots)
+
     } catch (err) {
       setError(err.message || 'Failed to load profile')
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function handleDeleteEntity(entityId, e) {
-    e.stopPropagation()
-
-    if (!confirm('Are you sure you want to delete this entity? This cannot be undone.')) {
-      return
-    }
-
-    const result = await deleteEntity(entityId)
-    if (result.success) {
-      setEntities(entities.filter(e => e.id !== entityId))
-    } else {
-      setError(result.error)
     }
   }
 
@@ -72,28 +73,54 @@ export default function ProfilePage() {
     navigate('/auth', { replace: true })
   }
 
+  /* ============================================================
+     DERIVED AGGREGATES
+  ============================================================ */
+
+  const totalEntities = entities.length
+
+  const totalEvents = Object.values(entitySnapshots)
+    .reduce((sum, s) => sum + (s?.event_count || 0), 0)
+
+  const totalNetPosition = Object.values(entitySnapshots)
+    .reduce((sum, s) => sum + (s?.total_equity || 0), 0)
+
+  /* ============================================================
+     RENDER
+  ============================================================ */
+
   if (loading) {
     return <div className="h-screen flex items-center justify-center">Loading…</div>
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-4xl mx-auto space-y-8">
+
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
             {error}
           </div>
         )}
 
-        {/* User Info */}
-        <div className="bg-white rounded border p-6 mb-8">
-          <h1 className="text-2xl font-bold mb-4">Profile</h1>
+        {/* ============================================================
+           USER DOMAIN SUMMARY
+        ============================================================ */}
 
-          <div className="space-y-2 mb-6">
-            <p className="text-gray-600">
-              <strong>Email:</strong> {user?.email}
-            </p>
-            <p className="text-gray-600">
+        <div className="bg-white rounded border p-6">
+          <h1 className="text-2xl font-bold mb-4">
+            Financial Steward Profile
+          </h1>
+
+          <div className="grid grid-cols-3 gap-6 text-sm">
+            <Metric label="Entities" value={totalEntities} />
+            <Metric label="Total Events" value={totalEvents} />
+            <Metric label="Aggregate Equity" value={totalNetPosition} />
+          </div>
+
+          <div className="mt-6 text-gray-600 text-sm">
+            <p><strong>Email:</strong> {user?.email}</p>
+            <p>
               <strong>Member Since:</strong>{' '}
               {user?.created_at
                 ? new Date(user.created_at).toLocaleDateString()
@@ -103,19 +130,22 @@ export default function ProfilePage() {
 
           <button
             onClick={handleSignOut}
-            className="text-red-600 hover:text-red-700 underline text-sm"
+            className="mt-4 text-red-600 hover:text-red-700 underline text-sm"
           >
             Sign Out
           </button>
         </div>
 
-        {/* Entities */}
+        {/* ============================================================
+           ENTITIES
+        ============================================================ */}
+
         <div className="bg-white rounded border p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold">My Entities</h2>
+            <h2 className="text-xl font-bold">Economic Entities</h2>
             <button
               onClick={() => navigate('/entities/new')}
-              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
+              className="bg-black text-white px-4 py-2 rounded text-sm hover:opacity-90"
             >
               + Create Entity
             </button>
@@ -123,40 +153,57 @@ export default function ProfilePage() {
 
           {entities.length === 0 ? (
             <p className="text-gray-500 text-center py-8">
-              No entities yet. Create one to get started.
+              No entities yet. Create one to begin recording economic reality.
             </p>
           ) : (
-            <ul className="space-y-3">
-              {entities.map(entity => (
-                <li
-                  key={entity.id}
-                  className="flex items-center justify-between border rounded p-4 hover:bg-gray-50 transition cursor-pointer group"
-                  onClick={() => navigate(`/entities/${entity.id}`)}
-                >
-                  <div className="flex-1">
-                    <h3 className="font-semibold">{entity.name}</h3>
-                    <p className="text-sm text-gray-600">
-                      {entity.type} • Created{' '}
-                      {entity.created_at
-                        ? new Date(entity.created_at).toLocaleDateString()
-                        : 'Unknown'}
-                    </p>
-                  </div>
+            <div className="grid md:grid-cols-2 gap-6">
+              {entities.map(entity => {
+                const snapshot = entitySnapshots[entity.id]
 
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      onClick={(e) => handleDeleteEntity(entity.id, e)}
-                      className="text-red-600 hover:text-red-700 text-sm underline"
-                    >
-                      Delete
-                    </button>
+                return (
+                  <div
+                    key={entity.id}
+                    onClick={() => navigate(`/entities/${entity.id}`)}
+                    className="border rounded p-5 hover:shadow-sm transition cursor-pointer"
+                  >
+                    <h3 className="font-semibold text-lg mb-2">
+                      {entity.name}
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <Metric label="Events" value={snapshot?.event_count} />
+                      <Metric label="Net Profit" value={snapshot?.net_profit} />
+                      <Metric label="Assets" value={snapshot?.total_assets} />
+                      <Metric label="Liabilities" value={snapshot?.total_liabilities} />
+                    </div>
                   </div>
-                </li>
-              ))}
-            </ul>
+                )
+              })}
+            </div>
           )}
         </div>
+
       </div>
     </div>
   )
+}
+
+/* ============================================================
+   UI HELPERS
+============================================================ */
+
+function Metric({ label, value }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-gray-500 text-xs">{label}</span>
+      <span className="font-semibold text-base">
+        {format(value)}
+      </span>
+    </div>
+  )
+}
+
+function format(value) {
+  if (!value) return '0'
+  return new Intl.NumberFormat().format(value)
 }
