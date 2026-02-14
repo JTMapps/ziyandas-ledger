@@ -115,14 +115,14 @@ export default function HomeTab() {
         {!loadingSnapshot && snapshot && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
 
-            <Metric label="Income" value={snapshot.total_income} />
+            <Metric label="Income" value={Math.abs(snapshot.total_income)} />
             <Metric label="Expenses" value={snapshot.total_expenses} />
             <Metric label="Net Profit" value={snapshot.net_profit} />
 
             <Metric label="Cash" value={snapshot.total_cash} />
             <Metric label="Assets" value={snapshot.total_assets} />
-            <Metric label="Liabilities" value={snapshot.total_liabilities} />
-            <Metric label="Equity" value={snapshot.total_equity} />
+            <Metric label="Liabilities" value={Math.abs(snapshot.total_liabilities)} />
+            <Metric label="Equity" value={Math.abs(snapshot.total_equity)} />
             <Metric label="Events" value={snapshot.event_count} />
 
           </div>
@@ -133,9 +133,9 @@ export default function HomeTab() {
       {!loadingSnapshot && snapshot && (
         <div className="bg-gray-50 border rounded p-4 text-sm">
           <strong>Accounting Identity:</strong>{' '}
-          {format(snapshot.total_assets)} ={' '}
-          {format(snapshot.total_liabilities)} +{' '}
-          {format(snapshot.total_equity)}
+          {format(snapshot.total_assets)} =
+          {format(Math.abs(snapshot.total_liabilities))} +
+          {format(Math.abs(snapshot.total_equity))}
         </div>
       )}
 
