@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { recordEconomicEvent } from '../../domain/events/eventOrchestrator'
+import { supabase } from '../../lib/supabase'
 import {
   revenueEarned,
   expenseIncurred,
@@ -18,6 +18,10 @@ export default function EventModal({ entity, onClose }) {
 
   const today = new Date().toISOString().split('T')[0]
 
+  /* ============================================================
+     TEMPLATE BUILDER
+  ============================================================ */
+
   function buildTemplate(numericAmount) {
     switch (eventType) {
       case 'REVENUE_EARNED':
@@ -33,8 +37,14 @@ export default function EventModal({ entity, onClose }) {
     }
   }
 
+  /* ============================================================
+     PREVIEW
+  ============================================================ */
+
   function generatePreview() {
     try {
+      setError(null)
+
       const numericAmount = parseFloat(amount)
 
       if (!numericAmount || numericAmount <= 0) {
@@ -42,6 +52,7 @@ export default function EventModal({ entity, onClose }) {
       }
 
       const template = buildTemplate(numericAmount)
+
       setPreview(template)
       setStep(3)
     } catch (err) {
@@ -49,26 +60,47 @@ export default function EventModal({ entity, onClose }) {
     }
   }
 
+  /* ============================================================
+     SUBMIT (RPC CALL)
+  ============================================================ */
+
   async function handleSubmit() {
     try {
       setLoading(true)
       setError(null)
 
-      await recordEconomicEvent({
-        entityId: entity.id,
-        eventType: preview.eventType,
-        eventDate: today,
-        description,
-        effects: preview.effects
+      // Get authenticated user from Supabase
+      const {
+        data: { user },
+        error: userError
+      } = await supabase.auth.getUser()
+
+      if (userError || !user) {
+        throw new Error('User not authenticated')
+      }
+
+      const { error: rpcError } = await supabase.rpc('record_economic_event', {
+        p_entity_id: entity.id,
+        p_event_type: preview.eventType,
+        p_event_date: today,
+        p_description: description || null,
+        p_effects: preview.effects
       })
 
+      if (rpcError) throw rpcError
+
       onClose()
+
     } catch (err) {
-      setError(err.message)
+      setError(err.message || 'Failed to record event')
     } finally {
       setLoading(false)
     }
   }
+
+  /* ============================================================
+     UI
+  ============================================================ */
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
