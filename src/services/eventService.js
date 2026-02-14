@@ -2,89 +2,63 @@
  * eventService.js
  *
  * Core service for recording and querying economic events and their effects.
- * All mutations flow through this service.
- *
- * This version is aligned to the dimensional accounting model:
+ * All mutations flow through the Postgres RPC function:
+ *   record_economic_event
  *
  * event_effect_type:
  *   CASH, ASSET, LIABILITY, INCOME, EXPENSE, EQUITY
  *
  * effect_sign:
- *   +1 or -1
+ *   +1 (DR) or -1 (CR)
  */
 
 import { supabase, getCurrentUser } from '../lib/supabase'
 import { eventEmitter } from '../lib/eventEmitter'
 
 /* ============================================================
-   RECORD ECONOMIC EVENT
+   RECORD ECONOMIC EVENT (RPC - ATOMIC)
 ============================================================ */
 
 export async function recordEconomicEvent({
   entityId,
   eventType,
   eventDate = new Date().toISOString().split('T')[0],
-  description,
-  sourceReference,
-  jurisdiction = 'ZA',
+  description = null,
   effects = []
 }) {
   try {
+    if (!entityId) {
+      throw new Error('entityId is required')
+    }
+
+    if (!effects || effects.length < 2) {
+      throw new Error('At least two effects are required')
+    }
+
     const { user, error: userError } = await getCurrentUser()
     if (userError) throw userError
     if (!user) throw new Error('Not authenticated')
 
-    // 1️⃣ Create economic event
-    const { data: eventData, error: eventError } = await supabase
-      .from('economic_events')
-      .insert({
-        user_id: user.id,
-        entity_id: entityId,
-        event_type: eventType,
-        event_date: eventDate,
-        description,
-        source_reference: sourceReference,
-        jurisdiction,
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single()
+    const { data, error } = await supabase.rpc('record_economic_event', {
+      p_user_id: user.id,
+      p_entity_id: entityId,
+      p_event_type: eventType,
+      p_event_date: eventDate,
+      p_description: description,
+      p_effects: effects
+    })
 
-    if (eventError) throw eventError
+    if (error) throw error
 
-    // 2️⃣ Insert dimensional effects
-    let effectsData = []
-
-    if (effects.length > 0) {
-      const payloads = effects.map(effect => ({
-        event_id: eventData.id,
-        effect_type: effect.effectType, // CASH | ASSET | LIABILITY | ...
-        amount: effect.amount,
-        effect_sign: effect.effectSign, // +1 or -1
-        created_at: new Date().toISOString()
-      }))
-
-      const { data, error } = await supabase
-        .from('event_effects')
-        .insert(payloads)
-        .select()
-
-      if (error) throw error
-      effectsData = data
-    }
-
-    // 3️⃣ Emit domain event
+    // Emit domain event for UI refresh
     eventEmitter.emit('ECONOMIC_EVENT_RECORDED', {
-      event: eventData,
-      effects: effectsData
+      entityId,
+      eventType
     })
 
     return {
       success: true,
-      data: {
-        event: eventData,
-        effects: effectsData
-      }
+      eventId: data
     }
 
   } catch (error) {
