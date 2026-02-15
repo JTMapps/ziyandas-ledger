@@ -1,278 +1,217 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useEntity } from '../../../context/EntityContext'
-import { queryEventsByEntity } from '../../../services/eventService'
-import { getEntitySnapshot } from '../../../services/entityService'
-import { eventEmitter } from '../../../lib/eventEmitter'
+import { supabase } from '../../../lib/supabase'
 import EventModal from '../../../components/events/EventModal'
+import { ARCHETYPES } from '../../../domain/events/archetypes'
 
 export default function HomeTab() {
   const { entity } = useEntity()
 
   const [events, setEvents] = useState([])
   const [snapshot, setSnapshot] = useState(null)
-
-  const [loadingEvents, setLoadingEvents] = useState(false)
-  const [loadingSnapshot, setLoadingSnapshot] = useState(false)
+  const [archetypeSummary, setArchetypeSummary] = useState([])
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
 
   /* ============================================================
-     LOADERS
+     DATA LOADER
   ============================================================ */
 
-  const loadSnapshot = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!entity) return
 
-    setLoadingSnapshot(true)
+    setLoading(true)
 
-    try {
-      const result = await getEntitySnapshot(entity.id)
+    const [
+      { data: eventsData },
+      { data: snapshotData },
+      { data: archetypeData }
+    ] = await Promise.all([
+      supabase
+        .from('economic_events')
+        .select('*')
+        .eq('entity_id', entity.id)
+        .order('event_date', { ascending: false })
+        .limit(10),
 
-      if (result.success) {
-        setSnapshot(result.snapshot)
-      } else {
-        console.error(result.error)
-      }
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoadingSnapshot(false)
-    }
+      supabase.rpc('get_entity_snapshot', {
+        p_entity_id: entity.id
+      }),
+
+      supabase.rpc('get_archetype_summary', {
+        p_entity_id: entity.id
+      })
+    ])
+
+    setEvents(eventsData || [])
+    setSnapshot(snapshotData || null)
+    setArchetypeSummary(archetypeData || [])
+    setLoading(false)
   }, [entity])
 
-  const loadEvents = useCallback(async () => {
-    if (!entity) return
-
-    setLoadingEvents(true)
-
-    try {
-      const result = await queryEventsByEntity(entity.id, { limit: 10 })
-
-      if (result.success) {
-        setEvents(result.data)
-      } else {
-        console.error(result.error)
-      }
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoadingEvents(false)
-    }
-  }, [entity])
-
-  const loadAll = useCallback(async () => {
-    if (!entity) return
-    await Promise.all([loadSnapshot(), loadEvents()])
-  }, [entity, loadSnapshot, loadEvents])
-
-  /* ============================================================
-     EFFECTS
-  ============================================================ */
-
   useEffect(() => {
-    loadAll()
-  }, [loadAll])
+    loadData()
+  }, [loadData])
 
-  useEffect(() => {
-    const handler = () => loadAll()
-
-    eventEmitter.on('ECONOMIC_EVENT_RECORDED', handler)
-
-    return () => {
-      eventEmitter.off('ECONOMIC_EVENT_RECORDED', handler)
-    }
-  }, [loadAll])
-
-  if (!entity) {
-    return <div className="p-6">No entity selected.</div>
+  function closeModal() {
+    setShowModal(false)
+    loadData()
   }
 
+  /* ============================================================
+     HELPERS
+  ============================================================ */
+
+  function getArchetypeLabel(value) {
+    for (const category of Object.values(ARCHETYPES)) {
+      const found = category.items.find(i => i.value === value)
+      if (found) return found.label
+    }
+    return value
+  }
+
+  function format(value) {
+    return new Intl.NumberFormat().format(value || 0)
+  }
+
+  if (!entity) return <div className="p-6">No entity selected.</div>
+
+  /* ============================================================
+     UI
+  ============================================================ */
+
   return (
-  <div className="p-6 space-y-10">
+    <div className="p-6 space-y-10">
 
-    {/* ============================================================
-       HEADER
-    ============================================================ */}
-    <div className="flex justify-between items-center">
-      <div>
-        <h1 className="text-xl font-bold">
-          Financial Overview
-        </h1>
-        <p className="text-gray-600 text-sm">
-          Summary of financial position and performance
-        </p>
+      {/* HEADER */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-xl font-bold">Financial Overview</h1>
+
+        <button
+          onClick={() => setShowModal(true)}
+          className="bg-black text-white px-4 py-2 rounded"
+        >
+          + Record Event
+        </button>
       </div>
 
-      <button
-        onClick={() => setShowModal(true)}
-        className="bg-black text-white px-4 py-2 rounded hover:opacity-90"
-      >
-        + Record Event
-      </button>
-    </div>
-
-    {showModal && (
-      <EventModal
-        entity={entity}
-        onClose={() => setShowModal(false)}
-      />
-    )}
-
-    {/* ============================================================
-       BALANCE SHEET (Statement of Financial Position)
-    ============================================================ */}
-    {!loadingSnapshot && snapshot && (
-      <div className="bg-white border rounded p-6 space-y-6">
-        <h2 className="font-semibold text-lg">
-          Statement of Financial Position
-        </h2>
-
-        <div className="grid md:grid-cols-3 gap-8 text-sm">
-
-          {/* Assets */}
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Assets</div>
-            <div className="font-semibold text-xl">
-              {format(snapshot.total_assets)}
-            </div>
-            <div className="text-gray-500 text-xs mt-2">
-              Cash: {format(snapshot.total_cash)}
-            </div>
-          </div>
-
-          {/* Liabilities */}
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Liabilities</div>
-            <div className="font-semibold text-xl">
-              {format(Math.abs(snapshot.total_liabilities))}
-            </div>
-          </div>
-
-          {/* Equity */}
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Equity</div>
-            <div className="font-semibold text-xl">
-              {format(Math.abs(snapshot.total_equity))}
-            </div>
-          </div>
-
-        </div>
-
-        <div className="border-t pt-4 text-sm text-gray-600">
-          Accounting Identity:
-          {' '}
-          {format(snapshot.total_assets)} =
-          {' '}
-          {format(Math.abs(snapshot.total_liabilities))}
-          {' + '}
-          {format(Math.abs(snapshot.total_equity))}
-        </div>
-      </div>
-    )}
-
-    {/* ============================================================
-       PROFIT & LOSS
-    ============================================================ */}
-    {!loadingSnapshot && snapshot && (
-      <div className="bg-white border rounded p-6 space-y-6">
-        <h2 className="font-semibold text-lg">
-          Statement of Profit or Loss
-        </h2>
-
-        <div className="grid md:grid-cols-3 gap-8 text-sm">
-
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Income</div>
-            <div className="font-semibold text-xl text-green-600">
-              {format(Math.abs(snapshot.total_income))}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Expenses</div>
-            <div className="font-semibold text-xl text-red-600">
-              {format(snapshot.total_expenses)}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-gray-500 text-xs mb-1">Net Profit</div>
-            <div
-              className={`font-semibold text-xl ${
-                snapshot.net_profit >= 0
-                  ? 'text-green-600'
-                  : 'text-red-600'
-              }`}
-            >
-              {format(snapshot.net_profit)}
-            </div>
-          </div>
-
-        </div>
-      </div>
-    )}
-
-    {/* ============================================================
-       KEY RATIOS
-    ============================================================ */}
-    {!loadingSnapshot && snapshot && (
-      <div className="bg-gray-50 border rounded p-6">
-        <h2 className="font-semibold mb-4">Key Metrics</h2>
-
-        <div className="grid md:grid-cols-3 gap-6 text-sm">
-
-          <Metric
-            label="Debt Ratio"
-            value={
-              snapshot.total_assets > 0
-                ? (
-                    Math.abs(snapshot.total_liabilities) /
-                    snapshot.total_assets
-                  ).toFixed(2)
-                : 0
-            }
-          />
-
-          <Metric
-            label="Profit Margin"
-            value={
-              snapshot.total_income > 0
-                ? (
-                    snapshot.net_profit /
-                    Math.abs(snapshot.total_income)
-                  ).toFixed(2)
-                : 0
-            }
-          />
-
-          <Metric
-            label="Event Count"
-            value={snapshot.event_count}
-          />
-
-        </div>
-      </div>
-    )}
-
-    {/* ============================================================
-       RECENT EVENTS
-    ============================================================ */}
-    <div className="bg-white border rounded p-6">
-      <h2 className="font-semibold mb-4">Recent Events</h2>
-
-      {loadingEvents && <p>Loading…</p>}
-
-      {!loadingEvents && events.length === 0 && (
-        <p className="text-gray-500 text-sm">
-          No events recorded.
-        </p>
+      {showModal && (
+        <EventModal entity={entity} onClose={closeModal} />
       )}
 
-      <div className="space-y-4">
+      {/* ============================================================
+         FINANCIAL POSITION
+      ============================================================ */}
+      {!loading && snapshot && (
+        <div className="bg-white border rounded p-6 space-y-6">
+          <h2 className="font-semibold text-lg">
+            Statement of Financial Position
+          </h2>
+
+          <div className="grid md:grid-cols-3 gap-8 text-sm">
+            <Metric label="Assets" value={snapshot.total_assets} />
+            <Metric label="Liabilities" value={Math.abs(snapshot.total_liabilities)} />
+            <Metric label="Equity" value={snapshot.total_equity} />
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+         FINANCIAL RATIOS
+      ============================================================ */}
+      {!loading && snapshot && (
+        <div className="bg-gray-50 border rounded p-6">
+          <h2 className="font-semibold mb-4">Financial Ratios</h2>
+
+          <div className="grid md:grid-cols-3 gap-6 text-sm">
+
+            <Metric
+              label="Debt Ratio"
+              value={
+                snapshot.total_assets > 0
+                  ? (
+                      Math.abs(snapshot.total_liabilities) /
+                      snapshot.total_assets
+                    ).toFixed(2)
+                  : 0
+              }
+            />
+
+            <Metric
+              label="Profit Margin"
+              value={
+                snapshot.total_income > 0
+                  ? (
+                      snapshot.net_profit /
+                      Math.abs(snapshot.total_income)
+                    ).toFixed(2)
+                  : 0
+              }
+            />
+
+            <Metric
+              label="Return on Assets"
+              value={
+                snapshot.total_assets > 0
+                  ? (
+                      snapshot.net_profit /
+                      snapshot.total_assets
+                    ).toFixed(2)
+                  : 0
+              }
+            />
+
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+         ARCHETYPE ANALYTICS
+      ============================================================ */}
+      {!loading && archetypeSummary.length > 0 && (
+        <div className="bg-white border rounded p-6">
+          <h2 className="font-semibold mb-4">Archetype Breakdown</h2>
+
+          <div className="space-y-2 text-sm">
+            {archetypeSummary.map(row => (
+              <div key={row.event_type} className="flex justify-between">
+                <span>{getArchetypeLabel(row.event_type)}</span>
+                <span>{format(row.total_amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+         TAX ANALYTICS
+      ============================================================ */}
+      {!loading && snapshot?.tax_summary && (
+        <div className="bg-white border rounded p-6">
+          <h2 className="font-semibold mb-4">Tax Summary</h2>
+
+          <div className="space-y-2 text-sm">
+            {Object.entries(snapshot.tax_summary).map(([key, value]) => (
+              <div key={key} className="flex justify-between">
+                <span>{key}</span>
+                <span>{format(value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+         RECENT EVENTS
+      ============================================================ */}
+      <div className="bg-white border rounded p-6">
+        <h2 className="font-semibold mb-4">Recent Events</h2>
+
         {events.map(event => (
           <div key={event.id} className="border-b pb-3 text-sm">
             <div className="flex justify-between">
               <span className="font-medium">
-                {event.event_type}
+                {getArchetypeLabel(event.event_type)}
               </span>
               <span className="text-gray-500">
                 {new Date(event.event_date).toLocaleDateString()}
@@ -284,26 +223,22 @@ export default function HomeTab() {
           </div>
         ))}
       </div>
-    </div>
-  </div>
-)
 
+    </div>
+  )
 }
 
-/* UI HELPERS */
+/* ============================================================
+   UI HELPER
+============================================================ */
 
 function Metric({ label, value }) {
   return (
     <div className="flex flex-col">
       <span className="text-gray-500 text-xs">{label}</span>
       <span className="font-semibold text-base">
-        {format(value)}
+        {new Intl.NumberFormat().format(value || 0)}
       </span>
     </div>
   )
-}
-
-function format(value) {
-  if (!value) return '0'
-  return new Intl.NumberFormat().format(value)
 }

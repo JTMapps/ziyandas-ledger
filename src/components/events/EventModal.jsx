@@ -1,226 +1,139 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import {
-  revenueEarned,
-  expenseIncurred,
-  assetAcquiredWithCash,
-  liabilityIncurred
-} from '../../domain/events/eventTemplates'
+import { ARCHETYPES } from '../../domain/events/archetypes'
 
 export default function EventModal({ entity, onClose }) {
-  const [step, setStep] = useState(1)
-  const [eventType, setEventType] = useState('')
+  const [category, setCategory] = useState('')
+  const [archetype, setArchetype] = useState(null)
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
-  const [preview, setPreview] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   const today = new Date().toISOString().split('T')[0]
 
-  /* ============================================================
-     TEMPLATE BUILDER
-  ============================================================ */
+  const selectedItems = category
+    ? ARCHETYPES[category]?.items || []
+    : []
 
-  function buildTemplate(numericAmount) {
-    switch (eventType) {
-      case 'REVENUE_EARNED':
-        return revenueEarned({ amount: numericAmount })
-      case 'EXPENSE_INCURRED':
-        return expenseIncurred({ amount: numericAmount })
-      case 'ASSET_ACQUIRED':
-        return assetAcquiredWithCash({ amount: numericAmount })
-      case 'LIABILITY_INCURRED':
-        return liabilityIncurred({ amount: numericAmount })
-      default:
-        throw new Error('Please select an event type')
-    }
-  }
+  const selectedArchetype = selectedItems.find(
+    item => item.value === archetype
+  )
 
-  /* ============================================================
-     PREVIEW
-  ============================================================ */
-
-  function generatePreview() {
-    try {
-      setError(null)
-
-      const numericAmount = parseFloat(amount)
-
-      if (!numericAmount || numericAmount <= 0) {
-        throw new Error('Amount must be greater than 0')
-      }
-
-      const template = buildTemplate(numericAmount)
-
-      setPreview(template)
-      setStep(3)
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  /* ============================================================
-     SUBMIT (RPC CALL)
-  ============================================================ */
+  const numericAmount = Number(amount)
+  const previewEffects =
+    selectedArchetype && numericAmount > 0
+      ? selectedArchetype.buildEffects(numericAmount)
+      : []
 
   async function handleSubmit() {
     try {
+      if (!selectedArchetype || numericAmount <= 0) {
+        throw new Error('Complete all fields')
+      }
+
       setLoading(true)
       setError(null)
 
-      // Get authenticated user from Supabase
-      const {
-        data: { user },
-        error: userError
-      } = await supabase.auth.getUser()
-
-      if (userError || !user) {
-        throw new Error('User not authenticated')
-      }
-
-      const { error: rpcError } = await supabase.rpc('record_economic_event', {
-        p_entity_id: entity.id,
-        p_event_type: preview.eventType,
-        p_event_date: today,
-        p_description: description || null,
-        p_effects: preview.effects
-      })
+      const { error: rpcError } = await supabase.rpc(
+        'record_economic_event',
+        {
+          p_entity_id: entity.id,
+          p_event_type: selectedArchetype.value,
+          p_event_date: today,
+          p_description: description || null,
+          p_effects: previewEffects
+        }
+      )
 
       if (rpcError) throw rpcError
 
       onClose()
 
     } catch (err) {
-      setError(err.message || 'Failed to record event')
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  /* ============================================================
-     UI
-  ============================================================ */
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
       <div className="bg-white w-full max-w-lg rounded p-6 space-y-6">
 
-        <h2 className="text-xl font-bold">Record Economic Event</h2>
+        <h2 className="text-xl font-bold">Record Event</h2>
 
-        {step === 1 && (
-          <>
-            <select
-              className="w-full border rounded p-2"
-              value={eventType}
-              onChange={e => setEventType(e.target.value)}
-            >
-              <option value="">Select Event Type</option>
-              <option value="REVENUE_EARNED">Revenue Earned</option>
-              <option value="EXPENSE_INCURRED">Expense Incurred</option>
-              <option value="ASSET_ACQUIRED">Asset Acquired</option>
-              <option value="LIABILITY_INCURRED">Liability Incurred</option>
-            </select>
+        <select
+          value={category}
+          onChange={e => {
+            setCategory(e.target.value)
+            setArchetype(null)
+          }}
+          className="w-full border p-2 rounded"
+        >
+          <option value="">Select Category</option>
+          {Object.entries(ARCHETYPES).map(([key, value]) => (
+            <option key={key} value={key}>
+              {value.label}
+            </option>
+          ))}
+        </select>
 
-            <div className="flex justify-end">
-              <button
-                disabled={!eventType}
-                onClick={() => setStep(2)}
-                className="px-4 py-2 bg-black text-white rounded"
-              >
-                Next
-              </button>
-            </div>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <input
-              type="number"
-              placeholder="Amount"
-              className="w-full border rounded p-2"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-            />
-
-            <textarea
-              placeholder="Description (optional)"
-              className="w-full border rounded p-2"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-            />
-
-            {error && (
-              <div className="text-red-600 text-sm">{error}</div>
-            )}
-
-            <div className="flex justify-between">
-              <button
-                onClick={() => setStep(1)}
-                className="px-4 py-2 border rounded"
-              >
-                Back
-              </button>
-              <button
-                onClick={generatePreview}
-                className="px-4 py-2 bg-black text-white rounded"
-              >
-                Preview Impact
-              </button>
-            </div>
-          </>
-        )}
-
-        {step === 3 && preview && (
-          <>
-            <div className="border rounded p-4 space-y-2 text-sm bg-gray-50">
-              <div className="font-medium">
-                {preview.eventType}
-              </div>
-
-              {preview.effects.map((effect, i) => (
-                <div key={i} className="flex justify-between">
-                  <span>{effect.effect_type}</span>
-                  <span>
-                    {effect.effect_sign > 0 ? '+' : '-'}
-                    {new Intl.NumberFormat().format(effect.amount)}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {error && (
-              <div className="text-red-600 text-sm">{error}</div>
-            )}
-
-            <div className="flex justify-between">
-              <button
-                onClick={() => setStep(2)}
-                className="px-4 py-2 border rounded"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="px-4 py-2 bg-black text-white rounded"
-              >
-                {loading ? 'Recording…' : 'Confirm & Record'}
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="flex justify-end pt-2 border-t">
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-500 hover:underline"
+        {category && (
+          <select
+            value={archetype || ''}
+            onChange={e => setArchetype(e.target.value)}
+            className="w-full border p-2 rounded"
           >
-            Cancel
+            <option value="">Select Event Type</option>
+            {selectedItems.map(item => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <input
+          type="number"
+          placeholder="Amount"
+          className="w-full border p-2 rounded"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+        />
+
+        <textarea
+          placeholder="Description (optional)"
+          className="w-full border p-2 rounded"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+        />
+
+        {previewEffects.length > 0 && (
+          <div className="bg-gray-50 p-4 rounded text-sm space-y-1">
+            {previewEffects.map((e, i) => (
+              <div key={i} className="flex justify-between">
+                <span>{e.effect_type}</span>
+                <span>
+                  {e.effect_sign > 0 ? '+' : '-'} {e.amount}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <div className="text-red-600">{error}</div>}
+
+        <div className="flex justify-between">
+          <button onClick={onClose}>Cancel</button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="bg-black text-white px-4 py-2 rounded"
+          >
+            {loading ? 'Posting…' : 'Confirm'}
           </button>
         </div>
-
       </div>
     </div>
   )
