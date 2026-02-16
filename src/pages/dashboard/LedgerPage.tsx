@@ -1,15 +1,21 @@
-import { useEconomicEvents } from "../../hooks/useEconomicEvents";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import JournalEntryModal from "../../components/events/JournalEntryModal"; 
+import { useEconomicEvents } from "../../hooks/useEconomicEvents";
 
 interface Props {
   entityId: string;
 }
 
 export default function LedgerPage({ entityId }: Props) {
-  const { recordEconomicEvent } = useEconomicEvents();
+  const { recordEconomicEvent } = useEconomicEvents();   // <-- Correct method name
+  const [showModal, setShowModal] = useState(false);
 
-  const { data: events, refetch } = useQuery({
+  // ---------------------------
+  // LOAD ECONOMIC EVENTS
+  // ---------------------------
+  const { data: events, refetch, isLoading } = useQuery({
     queryKey: ["events", entityId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -23,32 +29,32 @@ export default function LedgerPage({ entityId }: Props) {
     }
   });
 
-  async function handleAddSample() {
-    await recordEconomicEvent({
-      entityId,
-      eventType: "GENERAL_JOURNAL",
-      eventDate: new Date().toISOString(),
-      description: "Sample auto-generated event",
-      effects: [
-        { account_id: null, amount: 100, effect_sign: 1 },
-        { account_id: null, amount: 100, effect_sign: -1 }
-      ]
-    });
-    refetch();
-  }
-
   return (
     <div className="space-y-6">
+      {/* HEADER */}
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold">Ledger / Economic Events</h2>
+
         <button
           className="px-4 py-2 bg-black text-white rounded"
-          onClick={handleAddSample}
+          onClick={() => setShowModal(true)}
         >
-          + Add Sample Event
+          + Record Journal Entry
         </button>
       </div>
 
+      {/* JOURNAL ENTRY MODAL */}
+      {showModal && (
+        <JournalEntryModal
+          entityId={entityId}
+          onClose={() => {
+            setShowModal(false);
+            refetch();       // Refresh ledger after posting
+          }}
+        />
+      )}
+
+      {/* EVENTS TABLE */}
       <table className="min-w-full border rounded bg-white shadow-sm">
         <thead className="bg-gray-100 text-sm">
           <tr>
@@ -58,7 +64,16 @@ export default function LedgerPage({ entityId }: Props) {
             <th className="p-2 border">Created</th>
           </tr>
         </thead>
+
         <tbody>
+          {isLoading && (
+            <tr>
+              <td colSpan={4} className="text-center p-4">
+                Loading…
+              </td>
+            </tr>
+          )}
+
           {events?.map((ev: any) => (
             <tr key={ev.id} className="text-sm">
               <td className="border p-2">{ev.event_date}</td>
