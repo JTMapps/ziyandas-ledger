@@ -1,69 +1,53 @@
-import { Routes, Route, useParams } from 'react-router-dom'
-import { EntityProvider, useEntity } from '../context/EntityContext'
-import DashboardLayout from '../components/layout/DashboardLayout'
-import { NavLink } from 'react-router-dom'
+import { useParams, Routes, Route, Navigate } from "react-router-dom";
+import DashboardLayout from "../components/layout/DashboardLayout";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "../lib/supabase";
 
-import HomeTab from './dashboard/tabs/HomeTab'
-import IncomeOverview from './dashboard/tabs/IncomeOverview'
-import ExpensesOverview from './dashboard/tabs/ExpensesOverview'
-import AssetsOverview from './dashboard/tabs/AssetsOverview'
-import LiabilitiesOverview from './dashboard/tabs/LiabilitiesOverview'
-import AnalyticsOverview from './dashboard/tabs/AnalyticsOverview'
-
-function DashboardContent({ entityId }) {
-  const { entity } = useEntity()
-
-  const tabLinkClass = ({ isActive }) =>
-    isActive
-      ? 'border-b-2 border-black pb-2 font-semibold'
-      : 'text-gray-600 hover:text-black pb-2'
-
-  return (
-    <>
-
-      {/* 🔹 TAB NAVIGATION */}
-      <div className="border-b bg-white p-4 flex gap-8 text-sm">
-        <NavLink to={`/entities/${entityId}`} className={tabLinkClass}>
-          Home
-        </NavLink>
-        <NavLink to={`/entities/${entityId}/income`} className={tabLinkClass}>
-          Income
-        </NavLink>
-        <NavLink to={`/entities/${entityId}/expenses`} className={tabLinkClass}>
-          Expenses
-        </NavLink>
-        <NavLink to={`/entities/${entityId}/assets`} className={tabLinkClass}>
-          Assets
-        </NavLink>
-        <NavLink to={`/entities/${entityId}/liabilities`} className={tabLinkClass}>
-          Liabilities
-        </NavLink>
-        <NavLink to={`/entities/${entityId}/analytics`} className={tabLinkClass}>
-          Analytics
-        </NavLink>
-      </div>
-
-      {/* 🔹 TAB CONTENT */}
-      <Routes>
-        <Route index element={<HomeTab />} />
-        <Route path="income" element={<IncomeOverview />} />
-        <Route path="expenses" element={<ExpensesOverview />} />
-        <Route path="assets" element={<AssetsOverview />} />
-        <Route path="liabilities" element={<LiabilitiesOverview />} />
-        <Route path="analytics" element={<AnalyticsOverview />} />
-      </Routes>
-    </>
-  )
-}
+// Tab Screens (generated next)
+import OverviewPage from "./dashboard/OverviewPage";
+import LedgerPage from "./dashboard/LedgerPage";
+import StatementsPage from "./dashboard/StatementsPage";
+import YearEndPage from "./dashboard/YearEndPage";
+import TaxECLPage from "./dashboard/TaxECLPage";
 
 export default function EntityDashboard() {
-  const { entityId } = useParams()
+  const { entityId } = useParams();
+
+  const { data: entity } = useQuery({
+    queryKey: ["entity", entityId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("entities")
+        .select("id, name")
+        .eq("id", entityId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!entityId
+  });
+
+  if (!entityId) {
+    return <div className="p-6">Invalid entity</div>;
+  }
 
   return (
-    <EntityProvider entityId={entityId}>
-      <DashboardLayout>
-        <DashboardContent entityId={entityId} />
-      </DashboardLayout>
-    </EntityProvider>
-  )
+    <DashboardLayout entityName={entity?.name}>
+      <Routes>
+        {/* Default tab */}
+        <Route index element={<Navigate to="overview" replace />} />
+
+        {/* Enterprise tabs */}
+        <Route path="overview" element={<OverviewPage entityId={entityId} />} />
+        <Route path="ledger" element={<LedgerPage entityId={entityId} />} />
+        <Route path="statements" element={<StatementsPage entityId={entityId} />} />
+        <Route path="year-end" element={<YearEndPage entityId={entityId} />} />
+        <Route path="tax-ecl" element={<TaxECLPage entityId={entityId} />} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="overview" replace />} />
+      </Routes>
+    </DashboardLayout>
+  );
 }
