@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 import AuthPage from './AuthPage'
@@ -9,8 +9,8 @@ import ProfilePage from './ProfilePage'
 import EntityDashboard from './EntityDashboard'
 
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [session, setSession] = useState<null | any>(null)
+  const [loading, setLoading] = useState<boolean>(true)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -18,11 +18,11 @@ export default function App() {
       setLoading(false)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
+    const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => setSession(session)
     )
 
-    return () => listener.subscription.unsubscribe()
+    return () => authListener.subscription.unsubscribe()
   }, [])
 
   if (loading) {
