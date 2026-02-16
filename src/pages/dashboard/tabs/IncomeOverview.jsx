@@ -58,7 +58,7 @@ export default function IncomeOverview() {
         <h2 className="text-xl font-bold mb-4">Income Overview</h2>
 
         <div className="text-3xl font-semibold text-green-600">
-          R {Math.abs(snapshot?.total_income || 0).toLocaleString()}
+          R {snapshot?.total_income || 0}
         </div>
 
         <div className="text-sm text-gray-600 mt-2">

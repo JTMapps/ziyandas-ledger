@@ -32,12 +32,12 @@ export default function AnalyticsOverview() {
   return (
     <div className="p-6 grid grid-cols-3 gap-4">
 
-      <Metric label="Income" value={Math.abs(snapshot.total_income)} />
+      <Metric label="Income" value={snapshot.total_income} />
       <Metric label="Expenses" value={snapshot.total_expense} />
       <Metric label="Net Profit" value={snapshot.net_profit} />
 
       <Metric label="Assets" value={snapshot.total_assets} />
-      <Metric label="Liabilities" value={Math.abs(snapshot.total_liabilities)} />
+      <Metric label="Liabilities" value={snapshot.total_liabilities} />
       <Metric label="Equity" value={snapshot.total_equity} />
 
     </div>

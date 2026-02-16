@@ -47,7 +47,7 @@ export default function LiabilitiesOverview() {
 
         {!loading && snapshot && (
           <div className="text-3xl font-semibold text-green-600">
-            R {Math.abs(snapshot.total_liabilities).toLocaleString()}
+            R {snapshot.total_liabilities}
           </div>
         )}
       </div>

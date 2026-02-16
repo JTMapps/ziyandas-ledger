@@ -110,7 +110,7 @@ export default function HomeTab() {
 
           <div className="grid md:grid-cols-3 gap-8 text-sm">
             <Metric label="Assets" value={snapshot.total_assets} />
-            <Metric label="Liabilities" value={Math.abs(snapshot.total_liabilities)} />
+            <Metric label="Liabilities" value={snapshot.total_liabilities} />
             <Metric label="Equity" value={snapshot.total_equity} />
           </div>
         </div>
@@ -130,7 +130,7 @@ export default function HomeTab() {
               value={
                 snapshot.total_assets > 0
                   ? (
-                      Math.abs(snapshot.total_liabilities) /
+                      snapshot.total_liabilities /
                       snapshot.total_assets
                     ).toFixed(2)
                   : 0
@@ -143,7 +143,7 @@ export default function HomeTab() {
                 snapshot.total_income > 0
                   ? (
                       snapshot.net_profit /
-                      Math.abs(snapshot.total_income)
+                      snapshot.total_income
                     ).toFixed(2)
                   : 0
               }
