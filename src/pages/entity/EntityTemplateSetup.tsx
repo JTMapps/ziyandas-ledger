@@ -7,28 +7,35 @@ import { supabase } from "../../lib/supabase";
 import BusinessTemplatePreview from "../../components/templates/BusinessTemplatePreview";
 import PersonalTemplatePreview from "../../components/templates/PersonalTemplatePreview";
 
+import IndustryRetailPreview from "../../components/templates/IndustryRetailPreview";
+import IndustryManufacturingPreview from "../../components/templates/IndustryManufacturingPreview";
+import IndustryServicesPreview from "../../components/templates/IndustryServicesPreview";
+import IndustryRealEstatePreview from "../../components/templates/IndustryRealEstatePreview";
+import IndustryHospitalityPreview from "../../components/templates/IndustryHospitalityPreview";
+
 import {
   setupEntityTemplate,
   getEntityTemplateKind,
+  TemplateKind,
 } from "../../domain/templates/TemplateOrchestrator";
 
 export default function EntityTemplateSetup() {
   const { entityId } = useParams();
   const navigate = useNavigate();
 
-  const [selected, setSelected] = useState<"BUSINESS" | "PERSONAL" | null>(null);
+  const [selected, setSelected] = useState<TemplateKind | null>(null);
 
   if (!entityId) return <div>No entity found.</div>;
 
   // ----------------------------------------------------------
-  // 1) Load entity data (type, name, status)
+  // Load entity metadata
   // ----------------------------------------------------------
   const entityQuery = useQuery({
     queryKey: ["entity", entityId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("entities")
-        .select("id, name, type")
+        .select("id, name, type, industry_type")
         .eq("id", entityId)
         .single();
       if (error) throw error;
@@ -46,16 +53,14 @@ export default function EntityTemplateSetup() {
         .single();
 
       if (error && error.code !== "PGRST116") {
-        // ignore "no rows" error
         throw error;
       }
-
       return data;
     },
   });
 
   // ----------------------------------------------------------
-  // 2) If already assigned → redirect automatically
+  // Auto-redirect if entity already has a template
   // ----------------------------------------------------------
   useEffect(() => {
     if (templateStatusQuery.data?.template_group_id) {
@@ -63,13 +68,9 @@ export default function EntityTemplateSetup() {
     }
   }, [templateStatusQuery.data, entityId, navigate]);
 
-  // ----------------------------------------------------------
-  // 3) Apply Template → Assign + Build Accounts
-  // ----------------------------------------------------------
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("Select a template first");
-
       return setupEntityTemplate(entityId);
     },
     onSuccess: () => {
@@ -77,9 +78,6 @@ export default function EntityTemplateSetup() {
     },
   });
 
-  // ----------------------------------------------------------
-  // Loading states
-  // ----------------------------------------------------------
   if (entityQuery.isLoading || templateStatusQuery.isLoading) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -89,11 +87,122 @@ export default function EntityTemplateSetup() {
   }
 
   const entity = entityQuery.data;
-
   if (!entity) return <div>Entity not found</div>;
 
+  const isBusiness = entity.type === "Business";
+
   // ----------------------------------------------------------
-  // UI START
+  // BUTTON GROUP
+  // ----------------------------------------------------------
+  const businessButtons = (
+    <>
+      <button
+        onClick={() => setSelected("BUSINESS")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "BUSINESS"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Business (Standard IFRS)
+      </button>
+
+      <button
+        onClick={() => setSelected("RETAIL")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "RETAIL"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Retail Industry
+      </button>
+
+      <button
+        onClick={() => setSelected("MANUFACTURING")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "MANUFACTURING"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Manufacturing
+      </button>
+
+      <button
+        onClick={() => setSelected("SERVICES")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "SERVICES"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Professional Services
+      </button>
+
+      <button
+        onClick={() => setSelected("REAL_ESTATE")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "REAL_ESTATE"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Real Estate
+      </button>
+
+      <button
+        onClick={() => setSelected("HOSPITALITY")}
+        className={`px-6 py-3 rounded border text-sm font-medium ${
+          selected === "HOSPITALITY"
+            ? "bg-black text-white"
+            : "bg-white hover:bg-gray-100"
+        }`}
+      >
+        Hospitality
+      </button>
+    </>
+  );
+
+  const personalButtons = (
+    <button
+      onClick={() => setSelected("PERSONAL")}
+      className={`px-6 py-3 rounded border text-sm font-medium ${
+        selected === "PERSONAL"
+          ? "bg-black text-white"
+          : "bg-white hover:bg-gray-100"
+      }`}
+    >
+      Personal Finance Template
+    </button>
+  );
+
+  // ----------------------------------------------------------
+  // TEMPLATE PREVIEW SELECTOR
+  // ----------------------------------------------------------
+  function renderPreview() {
+    switch (selected) {
+      case "BUSINESS":
+        return <BusinessTemplatePreview />;
+      case "PERSONAL":
+        return <PersonalTemplatePreview />;
+      case "RETAIL":
+        return <IndustryRetailPreview />;
+      case "MANUFACTURING":
+        return <IndustryManufacturingPreview />;
+      case "SERVICES":
+        return <IndustryServicesPreview />;
+      case "REAL_ESTATE":
+        return <IndustryRealEstatePreview />;
+      case "HOSPITALITY":
+        return <IndustryHospitalityPreview />;
+      default:
+        return null;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // UI
   // ----------------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50 p-8 flex flex-col items-center">
@@ -103,49 +212,21 @@ export default function EntityTemplateSetup() {
         </h1>
 
         <p className="text-gray-600">
-          Choose how this entity captures financial information.  
-          Templates create a complete Chart of Accounts and define how data entry works.
+          Choose a financial accounting template. Industry templates automatically
+          configure IFRS-compliant accounts tailored to your business model.
         </p>
 
-        {/* Template Selection Buttons */}
-        <div className="flex space-x-4">
-          <button
-            onClick={() => setSelected("BUSINESS")}
-            className={`px-6 py-3 rounded border text-sm font-medium ${
-              selected === "BUSINESS"
-                ? "bg-black text-white"
-                : "bg-white hover:bg-gray-100"
-            }`}
-          >
-            Business Template
-          </button>
-
-          <button
-            onClick={() => setSelected("PERSONAL")}
-            className={`px-6 py-3 rounded border text-sm font-medium ${
-              selected === "PERSONAL"
-                ? "bg-black text-white"
-                : "bg-white hover:bg-gray-100"
-            }`}
-          >
-            Personal Finance Template
-          </button>
+        {/* Dynamic button rendering */}
+        <div className="flex flex-wrap gap-4">
+          {isBusiness ? businessButtons : personalButtons}
         </div>
 
-        {/* Template Preview */}
-        {selected === "BUSINESS" && (
-          <div className="border rounded p-6 bg-gray-50">
-            <BusinessTemplatePreview />
-          </div>
+        {/* PREVIEW */}
+        {selected && (
+          <div className="border rounded p-6 bg-gray-50">{renderPreview()}</div>
         )}
 
-        {selected === "PERSONAL" && (
-          <div className="border rounded p-6 bg-gray-50">
-            <PersonalTemplatePreview />
-          </div>
-        )}
-
-        {/* Apply Button */}
+        {/* APPLY BUTTON */}
         <button
           disabled={!selected || applyMutation.isPending}
           onClick={() => applyMutation.mutate()}

@@ -18,6 +18,7 @@ import {
 
 import { BusinessCaptureRules } from "./business/businessCaptureRules";
 import { PersonalCaptureRules } from "./personal/personalCaptureRules";
+import { IndustryCaptureRules } from "./industry/industryCaptureRules";
 
 import { EventOrchestrator } from "../../orchestrators/EventOrchestrator";
 
@@ -27,7 +28,6 @@ import {
   SERVICES_COA,
   REAL_ESTATE_COA,
   HOSPITALITY_COA,
-  IndustryTemplateKind,
 } from "./industry";
 
 // Combined type so hooks & UI can treat all accounts uniformly
@@ -42,15 +42,13 @@ export type TemplateKind =
   | "REAL_ESTATE"
   | "HOSPITALITY";
 
-
 export interface ApplyTemplateResult {
   template_group_id: string;
   accounts_created: number;
 }
 
 // ---------------------------------------------------------------------------
-// STEP 1 — ASSIGN TEMPLATE TO ENTITY (calls backend RPC)
-// This sets entity_template_selection.template_group_id
+// STEP 1 — ASSIGN TEMPLATE TO ENTITY
 // ---------------------------------------------------------------------------
 
 export async function assignTemplateToEntity(
@@ -61,6 +59,7 @@ export async function assignTemplateToEntity(
     BUSINESS: "Business",
     PERSONAL: "Personal",
 
+    // All industry templates use the Business backend template group
     RETAIL: "Business",
     MANUFACTURING: "Business",
     SERVICES: "Business",
@@ -79,10 +78,8 @@ export async function assignTemplateToEntity(
   return data;
 }
 
-
 // ---------------------------------------------------------------------------
-// STEP 2 — APPLY TEMPLATE (generate accounts inside `accounts` table)
-// Calls PostgreSQL function: apply_template_to_entity
+// STEP 2 — APPLY TEMPLATE
 // ---------------------------------------------------------------------------
 
 export async function applyTemplateToEntity(
@@ -104,7 +101,7 @@ export async function applyTemplateToEntity(
 }
 
 // ---------------------------------------------------------------------------
-// STEP 3 — FETCH APPLIED ACCOUNTS FOR AN ENTITY
+// STEP 3 — FETCH APPLIED ACCOUNTS
 // ---------------------------------------------------------------------------
 
 export async function loadAppliedAccounts(
@@ -112,8 +109,7 @@ export async function loadAppliedAccounts(
 ): Promise<AppliedAccount[]> {
   const { data, error } = await supabase
     .from("accounts")
-    .select(
-      `
+    .select(`
       id,
       account_code,
       account_name,
@@ -128,8 +124,7 @@ export async function loadAppliedAccounts(
       is_cash_account,
       normal_balance,
       display_order
-  `
-    )
+    `)
     .eq("entity_id", entityId)
     .order("display_order", { ascending: true });
 
@@ -138,8 +133,7 @@ export async function loadAppliedAccounts(
 }
 
 // ---------------------------------------------------------------------------
-// STEP 4 — RESOLVE PARENT/CHILD HIERARCHY
-// (Used for templates prior to being saved to DB)
+// STEP 4 — RESOLVE TEMPLATE HIERARCHY
 // ---------------------------------------------------------------------------
 
 export function resolveTemplateHierarchy(
@@ -155,7 +149,7 @@ export function resolveTemplateHierarchy(
 }
 
 // ---------------------------------------------------------------------------
-// STEP 5 — GET WHICH TEMPLATE IS USED FOR AN ENTITY
+// STEP 5 — DETERMINE TEMPLATE KIND
 // ---------------------------------------------------------------------------
 
 export async function getEntityTemplateKind(
@@ -170,96 +164,80 @@ export async function getEntityTemplateKind(
   if (error) throw error;
 
   if (data.type === "Personal") return "PERSONAL";
-  if (data.type === "Business") {
-    // Check industry-specific override
-    if (data.industry_type) {
-      const map: Record<string, TemplateKind> = {
-        Retail: "RETAIL",
-        Manufacturing: "MANUFACTURING",
-        Services: "SERVICES",
-        RealEstate: "REAL_ESTATE",
-        Hospitality: "HOSPITALITY",
-      };
 
-      if (map[data.industry_type]) return map[data.industry_type];
+  if (data.type === "Business") {
+    const industryMap: Record<string, TemplateKind> = {
+      Retail: "RETAIL",
+      Manufacturing: "MANUFACTURING",
+      Services: "SERVICES",
+      RealEstate: "REAL_ESTATE",
+      Hospitality: "HOSPITALITY",
+    };
+
+    if (data.industry_type && industryMap[data.industry_type]) {
+      return industryMap[data.industry_type];
     }
 
-    // default fallback
     return "BUSINESS";
   }
 
-  // fallback
   return "BUSINESS";
 }
 
 // ---------------------------------------------------------------------------
-// STEP 6 — RUN CAPTURE RULES AND POST ENTRY
-// These rules convert user-friendly input → double-entry journal
+// STEP 6 — JOURNAL ENGINE (Business + Personal + Industry)
 // ---------------------------------------------------------------------------
 
 export const TemplateJournalEngine = {
   // ---------------- BUSINESS ----------------
-
   business: {
     revenue: async (entityId: string, amount: number, description?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
-      const journal = BusinessCaptureRules.revenue(accounts, {
-        amount,
-        description,
-      });
+      const journal = BusinessCaptureRules.revenue(accounts, { amount, description });
 
       return EventOrchestrator.recordEconomicEvent({
         entityId,
         eventType: journal.eventType,
         eventDate: new Date().toISOString(),
         description: journal.description,
-        effects: journal.effects.map(e => ({
-        account_id: e.account_id,
-        amount: e.amount,
-        effect_sign: e.effect_sign as 1 | -1,   // FIX HERE
+        effects: journal.effects.map((e) => ({
+          account_id: e.account_id,
+          amount: e.amount,
+          effect_sign: e.effect_sign as 1 | -1,
         })),
-
       });
     },
 
     expense: async (entityId: string, amount: number, description?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
-      const journal = BusinessCaptureRules.expense(accounts, {
-        amount,
-        description,
-      });
+      const journal = BusinessCaptureRules.expense(accounts, { amount, description });
 
       return EventOrchestrator.recordEconomicEvent({
         entityId,
         eventType: journal.eventType,
         eventDate: new Date().toISOString(),
         description: journal.description,
-        effects: journal.effects.map(e => ({
-        account_id: e.account_id,
-        amount: e.amount,
-        effect_sign: e.effect_sign as 1 | -1,   // FIX HERE
+        effects: journal.effects.map((e) => ({
+          account_id: e.account_id,
+          amount: e.amount,
+          effect_sign: e.effect_sign as 1 | -1,
         })),
-
       });
     },
   },
 
   // ---------------- PERSONAL ----------------
-
   personal: {
     salary: async (entityId: string, amount: number, source?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
-      const journal = PersonalCaptureRules.salary(accounts, {
-        amount,
-        source,
-      });
+      const journal = PersonalCaptureRules.salary(accounts, { amount, source });
 
       return EventOrchestrator.recordEconomicEvent({
         entityId,
         eventType: journal.eventType,
         eventDate: new Date().toISOString(),
         description: journal.description,
-        effects: journal.effects.map(e => ({
+        effects: journal.effects.map((e) => ({
           account_id: e.account_id,
           amount: e.amount,
           effect_sign: e.effect_sign as 1 | -1,
@@ -269,57 +247,254 @@ export const TemplateJournalEngine = {
 
     expense: async (entityId: string, amount: number, category?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
-      const journal = PersonalCaptureRules.expense(accounts, {
-        amount,
-        category,
-      });
+      const journal = PersonalCaptureRules.expense(accounts, { amount, category });
 
       return EventOrchestrator.recordEconomicEvent({
         entityId,
         eventType: journal.eventType,
         eventDate: new Date().toISOString(),
         description: journal.description,
-        effects: journal.effects.map(e => ({
-        account_id: e.account_id,
-        amount: e.amount,
-        effect_sign: e.effect_sign as 1 | -1,   // FIX HERE
+        effects: journal.effects.map((e) => ({
+          account_id: e.account_id,
+          amount: e.amount,
+          effect_sign: e.effect_sign as 1 | -1,
         })),
-
       });
     },
 
-    transfer: async (
-      entityId: string,
-      amount: number,
-      from_code: string,
-      to_code: string
-    ) => {
+    transfer: async (entityId: string, amount: number, from_code: string, to_code: string) => {
       const accounts = await loadAppliedAccounts(entityId);
-      const journal = PersonalCaptureRules.transfer(accounts, {
-        amount,
-        from_code,
-        to_code,
-      });
+      const journal = PersonalCaptureRules.transfer(accounts, { amount, from_code, to_code });
 
       return EventOrchestrator.recordEconomicEvent({
         entityId,
         eventType: journal.eventType,
         eventDate: new Date().toISOString(),
         description: journal.description,
-        effects: journal.effects.map(e => ({
-        account_id: e.account_id,
-        amount: e.amount,
-        effect_sign: e.effect_sign as 1 | -1,   // FIX HERE
+        effects: journal.effects.map((e) => ({
+          account_id: e.account_id,
+          amount: e.amount,
+          effect_sign: e.effect_sign as 1 | -1,
         })),
-
       });
+    },
+  },
+
+  // ---------------- INDUSTRY-SPECIFIC ----------------
+  industry: {
+    retail: {
+      sale: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.retail.sale(accounts, { amount, description });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+
+      purchaseInventory: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.retail.purchaseInventory(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+    },
+
+    manufacturing: {
+      consumeRawMaterials: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal =
+          IndustryCaptureRules.manufacturing.consumeRawMaterials(accounts, { amount, description });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+
+      completeProductionBatch: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal =
+          IndustryCaptureRules.manufacturing.completeProductionBatch(accounts, {
+            amount,
+            description,
+          });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+    },
+
+    services: {
+      clientInvoice: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.services.clientInvoice(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+
+      payContractor: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.services.payContractor(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+    },
+
+    hospitality: {
+      roomSale: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.hospitality.roomSale(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+
+      serviceMeal: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.hospitality.serviceMeal(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+    },
+
+    realEstate: {
+      rentIncome: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal = IndustryCaptureRules.realEstate.rentIncome(accounts, {
+          amount,
+          description,
+        });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
+
+      maintenanceExpense: async (entityId: string, amount: number, description?: string) => {
+        const accounts = await loadAppliedAccounts(entityId);
+        const journal =
+          IndustryCaptureRules.realEstate.maintenanceExpense(accounts, {
+            amount,
+            description,
+          });
+
+        return EventOrchestrator.recordEconomicEvent({
+          entityId,
+          eventType: journal.eventType,
+          eventDate: new Date().toISOString(),
+          description: journal.description,
+          effects: journal.effects.map((e) => ({
+            account_id: e.account_id,
+            amount: e.amount,
+            effect_sign: e.effect_sign as 1 | -1,
+          })),
+        });
+      },
     },
   },
 };
 
 // ---------------------------------------------------------------------------
-// TEMPLATE REGISTRY — maps TemplateKind → Chart of Accounts definition
+// TEMPLATE REGISTRY
 // ---------------------------------------------------------------------------
+
 export const TEMPLATE_REGISTRY: Record<TemplateKind, TemplateAccount[]> = {
   BUSINESS: BUSINESS_CHART_OF_ACCOUNTS,
   PERSONAL: PERSONAL_CHART_OF_ACCOUNTS,
@@ -332,17 +507,12 @@ export const TEMPLATE_REGISTRY: Record<TemplateKind, TemplateAccount[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// STEP 7 — HIGH LEVEL TEMPLATE FLOW CALLED BY UI
+// STEP 7 — HIGH LEVEL SETUP FLOW
 // ---------------------------------------------------------------------------
 
 export async function setupEntityTemplate(entityId: string) {
-  // 1. Determine template kind
   const kind = await getEntityTemplateKind(entityId);
-
-  // 2. Assign template group (assignTemplateToEntity does the mapping)
   const templateGroupId = await assignTemplateToEntity(entityId, kind);
-
-  // 3. Apply template → materialize accounts
   const applied = await applyTemplateToEntity(entityId);
 
   return {
@@ -355,11 +525,3 @@ export async function setupEntityTemplate(entityId: string) {
 export function getTemplateDefinition(kind: TemplateKind): TemplateAccount[] {
   return TEMPLATE_REGISTRY[kind];
 }
-
-export const IndustryCaptureRules = {
-  RETAIL: {},
-  MANUFACTURING: {},
-  SERVICES: {},
-  REAL_ESTATE: {},
-  HOSPITALITY: {},
-};

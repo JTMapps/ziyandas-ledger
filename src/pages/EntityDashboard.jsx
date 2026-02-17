@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
-
+import IndustryRouter from "./industryCapture/IndustryRouter";
 import DashboardLayout from "../components/layout/DashboardLayout";
 
 import OverviewPage from "./dashboard/OverviewPage";
@@ -26,6 +26,9 @@ export default function EntityDashboard() {
 
         {/* Default route → redirect to overview */}
         <Route path="*" element={<Navigate to="overview" replace />} />
+
+        {/* NEW: Industry operations router */}
+        <Route path="industry/*" element={<IndustryRouter />} />
       </Routes>
     </DashboardLayout>
   );
