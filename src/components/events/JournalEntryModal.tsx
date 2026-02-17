@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 import { EventOrchestrator } from "../../orchestrators/EventOrchestrator";
+import AccountPicker from "../pickers/AccountPicker";
 
 interface Props {
   entityId: string;
@@ -133,22 +134,15 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
           {lines.map((line, i) => (
             <div key={i} className="grid grid-cols-6 gap-2 items-center">
               {/* Account selector */}
-              <select
-                className="border p-2 rounded col-span-3"
+              <AccountPicker
+                entityId={entityId}
                 value={line.account_id}
-                onChange={(e) => {
+                onChange={(val) => {
                   const updated = [...lines];
-                  updated[i].account_id = e.target.value;
+                  updated[i].account_id = val;
                   setLines(updated);
                 }}
-              >
-                <option value="">Select account…</option>
-                {accountsQuery.data?.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.account_code} — {acc.account_name}
-                  </option>
-                ))}
-              </select>
+              />
 
               {/* Amount */}
               <input
