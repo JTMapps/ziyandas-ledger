@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 export default function EntitySetup() {
   const navigate = useNavigate();
@@ -48,7 +48,16 @@ export default function EntitySetup() {
       if (error) throw error;
       return data;
     },
-    onSuccess: (entity) => {
+    onSuccess: async (entity) => {
+      await supabase.rpc("assign_template_to_entity", {
+        p_entity_id: entity.id,
+        p_entity_type: selectedType
+      });
+
+      await supabase.rpc("generate_accounts_for_entity", {
+        p_entity_id: entity.id
+      });
+
       navigate(`/entities/${entity.id}/overview`, { replace: true });
     }
   });

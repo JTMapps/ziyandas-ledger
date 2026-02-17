@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase";
 
 import AuthPage from "../pages/AuthPage";
 import EntityGate from "../pages/EntityGate";
-import EntitySetup from "../pages/EntitySetup";
+import EntitySetup from "./entity/EntitySetup";
 import ProfilePage from "../pages/ProfilePage";
 import EntityDashboard from "../pages/EntityDashboard";
 
