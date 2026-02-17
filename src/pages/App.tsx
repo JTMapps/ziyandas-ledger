@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-import AuthPage from "../pages/AuthPage";
-import EntityGate from "../pages/EntityGate";
-import EntitySetup from "./entity/EntityTemplateSetup";
-import ProfilePage from "../pages/ProfilePage";
-import EntityDashboard from "../pages/EntityDashboard";
+import AuthPage from "./AuthPage";
+import EntityGate from "./EntityGate";
+import EntityTemplateSetup from "./entity/EntityTemplateSetup";
+import ProfilePage from "./ProfilePage";
+import EntityDashboard from "./EntityDashboard";
+import type { Session } from "@supabase/supabase-js";
 
 export default function App() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -27,7 +28,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center text-lg">
+      <div className="h-screen flex items-center justify-center">
         Loading…
       </div>
     );
@@ -39,20 +40,22 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Authentication */}
       <Route path="/auth" element={<AuthPage />} />
 
-      {/* Initial landing → determines whether entity exists */}
+      {/* Home / Entity selector */}
       <Route path="/" element={<EntityGate />} />
 
-      {/* Create new entity */}
-      <Route path="/entities/new" element={<EntitySetup />} />
+      {/* Create entity */}
+      <Route path="/entities/new" element={<EntityTemplateSetup />} />
 
       {/* User profile */}
       <Route path="/profile" element={<ProfilePage />} />
 
-      {/* Entity workspace (dashboard + industry operations + statements + accounts…) */}
+      {/* Entity dashboard with nested routes */}
       <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

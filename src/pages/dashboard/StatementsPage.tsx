@@ -5,96 +5,93 @@ import { supabase } from "../../lib/supabase";
 import StatementRenderer from "../../components/statements/StatementRenderer";
 import CashFlowIndirect from "../../components/statements/CashFlowIndirect";
 
+import { useReportingPeriods } from "../../hooks/useReportingPeriods";
+
 interface Props {
   entityId: string;
 }
 
 export default function StatementsPage({ entityId }: Props) {
+  const { periods, createIfMissing } = useReportingPeriods(entityId);
+
   const [statementType, setStatementType] = useState<"SOFP" | "P&L" | "OCI" | "CF">("SOFP");
-  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+  const [periodId, setPeriodId] = useState<string | null>(null);
 
-  // Load reporting periods
-  const { data: periods } = useQuery({
-    queryKey: ["periods", entityId],
+  // ---------------------------------------------------------------------------
+  // Load statement from backend RPC
+  // ---------------------------------------------------------------------------
+  const { data: statementData, isLoading } = useQuery({
+    queryKey: ["statement", entityId, periodId, statementType],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("reporting_periods")
-        .select("id, period_start, period_end")
-        .eq("entity_id", entityId)
-        .order("period_end", { ascending: false });
-      if (error) throw error;
-      return data;
-    }
-  });
+      if (!periodId) return null;
 
-  // Fetch non-CF statements through render_financial_statement RPC
-  const { data: statement, isLoading } = useQuery({
-    queryKey: ["statement", entityId, selectedPeriod, statementType],
-    enabled: !!selectedPeriod && statementType !== "CF",
-    queryFn: async () => {
       const { data, error } = await supabase.rpc("render_financial_statement", {
         p_entity_id: entityId,
-        p_period_id: selectedPeriod,
+        p_period_id: periodId,
         p_statement_type: statementType
       });
+
       if (error) throw error;
-      return data; // returns { statement_type, lines: [...] }
-    }
+      return data;
+    },
+    enabled: !!periodId
   });
 
+  // ---------------------------------------------------------------------------
+  // UI Rendering
+  // ---------------------------------------------------------------------------
   return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold">Financial Statements</h2>
+    <div className="space-y-8 p-6">
+      <h1 className="text-2xl font-bold">Financial Statements</h1>
 
-      {/* ------------------------------ */}
-      {/* STATEMENT TYPE TABS */}
-      {/* ------------------------------ */}
-      <div className="flex space-x-4">
-        {(["SOFP", "P&L", "OCI", "CF"] as const).map((type) => (
+      {/* Statement type selector */}
+      <div className="flex space-x-3">
+        {["SOFP", "P&L", "OCI", "CF"].map((st) => (
           <button
-            key={type}
+            key={st}
+            onClick={() => setStatementType(st as any)}
             className={`px-4 py-2 border rounded ${
-              statementType === type ? "bg-black text-white" : "bg-white"
+              statementType === st ? "bg-black text-white" : "bg-white"
             }`}
-            onClick={() => setStatementType(type)}
           >
-            {type}
+            {st}
           </button>
         ))}
       </div>
 
-      {/* ------------------------------ */}
-      {/* PERIOD SELECTOR */}
-      {/* ------------------------------ */}
-      <select
-        onChange={(e) => setSelectedPeriod(e.target.value)}
-        className="border p-2 rounded"
-      >
-        <option value="">Select period…</option>
-        {periods?.map((p: any) => (
-          <option key={p.id} value={p.id}>
-            {p.period_start} → {p.period_end}
-          </option>
-        ))}
-      </select>
+      {/* Period selector */}
+      <div>
+        <select
+          className="border p-2"
+          onChange={(e) => setPeriodId(e.target.value)}
+        >
+          <option value="">Select period…</option>
+          {periods.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.period_start} → {p.period_end}
+            </option>
+          ))}
+        </select>
 
-      {/* ------------------------------ */}
-      {/* DISPLAY STATEMENT */}
-      {/* ------------------------------ */}
-      {selectedPeriod ? (
-        statementType === "CF" ? (
-          <CashFlowIndirect entityId={entityId} periodId={selectedPeriod} />
-        ) : (
-          <>
-            {isLoading && <div>Loading statement…</div>}
+        <button
+          onClick={() => createIfMissing()}
+          className="ml-3 px-4 py-2 bg-blue-600 text-white rounded"
+        >
+          Auto-Create Periods
+        </button>
+      </div>
 
-            {statement && (
-              <StatementRenderer data={statement} />
-            )}
-          </>
-        )
-      ) : (
-        <div className="text-gray-500 text-sm">Select a reporting period.</div>
+      {/* Render statement */}
+      {isLoading && <div>Loading statement…</div>}
+
+      {statementData && (
+        <>
+          {statementType === "CF" ? (
+            <CashFlowIndirect entityId={entityId} periodId={periodId!} />
+          ) : (
+            <StatementRenderer data={statementData} />
+          )}
+        </>
       )}
     </div>
   );
