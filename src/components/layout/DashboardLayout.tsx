@@ -1,66 +1,74 @@
+import { NavLink, useParams } from "react-router-dom";
 import { ReactNode } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
-import EntitySwitcher from "../../components/EntitySwitcher";
+import EntitySwitcher from "../EntitySwitcher";
 
-interface Props {
+interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-export default function DashboardLayout({ children }: Props) {
+export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { entityId } = useParams();
 
-  const tabs = [
-    { path: "overview", label: "Overview" },
-    { path: "ledger", label: "Ledger / Events" },
-    { path: "statements", label: "Statements" },
-    { path: "year-end", label: "Year-End Close" },
-    { path: "tax-ecl", label: "Tax / ECL" }
+  const nav = [
+    { label: "Overview", path: "overview" },
+    { label: "Ledger", path: "ledger" },
+    { label: "Statements", path: "statements" },
+    { label: "Tax & ECL", path: "tax-ecl" },
+    { label: "Year End", path: "year-end" },
+    { label: "Personal Capture", path: "capture/personal" },
+    { label: "Industry Ops", path: "capture/industry" },
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="flex h-screen bg-gray-100">
 
-      {/* -------------------------------------------------- */}
-      {/* HEADER BAR                                         */}
-      {/* -------------------------------------------------- */}
-      <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
-        {/* Brand */}
-        <h1 className="text-xl font-bold">Ziyanda’s Ledger</h1>
+      {/* SIDEBAR */}
+      <aside className="w-64 bg-white border-r flex flex-col">
+        <div className="p-4 border-b">
+          <EntitySwitcher />
+        </div>
 
-        {/* Entity Switcher */}
-        <EntitySwitcher />
+        <nav className="flex-1 p-4 space-y-1">
+          {nav.map((item) => (
+            <NavLink
+              key={item.path}
+              to={`/entities/${entityId}/${item.path}`}
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded text-sm ${
+                  isActive
+                    ? "bg-black text-white"
+                    : "text-gray-700 hover:bg-gray-200"
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
 
-        {/* Profile Link */}
-        <Link to="/profile" className="text-sm underline">
-          Profile
-        </Link>
-      </header>
+      {/* MAIN AREA */}
+      <div className="flex-1 flex flex-col">
 
-      {/* -------------------------------------------------- */}
-      {/* TAB NAVIGATION                                     */}
-      {/* -------------------------------------------------- */}
-      <nav className="bg-gray-100 border-b px-4 flex space-x-4">
-        {tabs.map((t) => (
-          <NavLink
-            key={t.path}
-            to={`/entities/${entityId}/${t.path}`}
-            className={({ isActive }) =>
-              `py-3 px-4 text-sm font-medium border-b-2 transition-colors ${
-                isActive
-                  ? "border-black text-black"
-                  : "border-transparent text-gray-600 hover:text-black"
-              }`
-            }
-          >
-            {t.label}
-          </NavLink>
-        ))}
-      </nav>
+        {/* HEADER */}
+        <header className="h-14 bg-white border-b flex items-center justify-between px-6">
+          <h1 className="text-lg font-semibold text-gray-800">
+            {entityId ? `Entity #${entityId}` : ""}
+          </h1>
 
-      {/* -------------------------------------------------- */}
-      {/* MAIN CONTENT                                       */}
-      {/* -------------------------------------------------- */}
-      <main className="flex-1 p-6">{children}</main>
+          <nav>
+            <NavLink
+              to="/profile"
+              className="text-sm text-gray-600 hover:text-black"
+            >
+              Profile
+            </NavLink>
+          </nav>
+        </header>
+
+        {/* CONTENT */}
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      </div>
     </div>
   );
 }

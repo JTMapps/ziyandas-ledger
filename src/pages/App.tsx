@@ -40,22 +40,15 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/auth" element={<AuthPage />} />
+  <Route path="/auth" element={<AuthPage />} />
+  <Route path="/" element={<EntityGate />} />
+  <Route path="/entities/new" element={<EntityTemplateSetup />} />
+  <Route path="/profile" element={<ProfilePage />} />
 
-      {/* Home / Entity selector */}
-      <Route path="/" element={<EntityGate />} />
+  {/* Unified enterprise dashboard */}
+  <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
 
-      {/* Create entity */}
-      <Route path="/entities/new" element={<EntityTemplateSetup />} />
-
-      {/* User profile */}
-      <Route path="/profile" element={<ProfilePage />} />
-
-      {/* Entity dashboard with nested routes */}
-      <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
-
-      {/* Fallback */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+  <Route path="*" element={<Navigate to="/" replace />} />
+</Routes>
   );
 }

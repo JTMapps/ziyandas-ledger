@@ -14,29 +14,32 @@ import HospitalityMealServiceWizard from "./HospitalityMealServiceWizard";
 
 import RealEstateRentIncomeWizard from "./RealEstateRentIncomeWizard";
 import RealEstateMaintenanceWizard from "./RealEstateMaintenanceWizard";
+import DashboardLayout from "../../components/layout/DashboardLayout";
 
 export default function IndustryRouter() {
   return (
-    <Routes>
-      {/* Retail */}
-      <Route path="retail/sale" element={<RetailSaleWizard />} />
-      <Route path="retail/purchase" element={<RetailPurchaseWizard />} />
+    <DashboardLayout>
+        <Routes>
+        {/* Retail */}
+        <Route path="retail/sale" element={<RetailSaleWizard />} />
+        <Route path="retail/purchase" element={<RetailPurchaseWizard />} />
 
-      {/* Manufacturing */}
-      <Route path="manufacturing/consume" element={<ManufacturingConsumeRawMaterialsWizard />} />
-      <Route path="manufacturing/complete" element={<ManufacturingCompleteBatchWizard />} />
+        {/* Manufacturing */}
+        <Route path="manufacturing/consume" element={<ManufacturingConsumeRawMaterialsWizard />} />
+        <Route path="manufacturing/complete" element={<ManufacturingCompleteBatchWizard />} />
 
-      {/* Services */}
-      <Route path="services/invoice" element={<ServicesClientInvoiceWizard />} />
-      <Route path="services/contractor" element={<ServicesPayContractorWizard />} />
+        {/* Services */}
+        <Route path="services/invoice" element={<ServicesClientInvoiceWizard />} />
+        <Route path="services/contractor" element={<ServicesPayContractorWizard />} />
 
-      {/* Hospitality */}
-      <Route path="hospitality/room-sale" element={<HospitalityRoomSaleWizard />} />
-      <Route path="hospitality/meal-service" element={<HospitalityMealServiceWizard />} />
+        {/* Hospitality */}
+        <Route path="hospitality/room-sale" element={<HospitalityRoomSaleWizard />} />
+        <Route path="hospitality/meal-service" element={<HospitalityMealServiceWizard />} />
 
-      {/* Real Estate */}
-      <Route path="real-estate/rent-income" element={<RealEstateRentIncomeWizard />} />
-      <Route path="real-estate/maintenance" element={<RealEstateMaintenanceWizard />} />
-    </Routes>
+        {/* Real Estate */}
+        <Route path="real-estate/rent-income" element={<RealEstateRentIncomeWizard />} />
+        <Route path="real-estate/maintenance" element={<RealEstateMaintenanceWizard />} />
+        </Routes>
+    </DashboardLayout>
   );
 }
