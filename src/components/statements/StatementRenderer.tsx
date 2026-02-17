@@ -1,4 +1,7 @@
+// src/components/statements/StatementRenderer.tsx
+
 import React, { useState } from "react";
+import StatementSection from "./StatementSection";
 
 interface StatementLine {
   account_id: string;
@@ -8,7 +11,8 @@ interface StatementLine {
   level: number;
   order: number;
   is_subtotal?: boolean;
-  section?: string; // optional grouping tag from backend (SOFP/P&L/OCI grouping)
+  section?: string;
+  subsection?: string;
 }
 
 interface Props {
@@ -21,7 +25,6 @@ interface Props {
 export default function StatementRenderer({ data }: Props) {
   const { statement_type, lines } = data;
 
-  // Track collapsed groups
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   function toggle(code: string) {
@@ -31,120 +34,93 @@ export default function StatementRenderer({ data }: Props) {
     }));
   }
 
-  const sectionName = {
-    SOFP: "Statement of Financial Position",
-    "P&L": "Profit or Loss",
-    OCI: "Other Comprehensive Income",
-  }[statement_type];
+  function indent(level: number) {
+    return `pl-${Math.min(level * 4, 32)}`;
+  }
 
-  // -------------------------
-  // IFRS SECTION HEADERS
-  // -------------------------
-  const sectionHeaders: Record<string, string> = {
+  // ------------------------------
+  // GROUP BY SECTION
+  // ------------------------------
+  const grouped = lines.reduce((acc, line) => {
+    const key = line.section || "OTHER";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(line);
+    return acc;
+  }, {} as Record<string, StatementLine[]>);
+
+  const SECTION_NAMES: Record<string, string> = {
     ASSETS: "Assets",
     LIABILITIES: "Liabilities",
     EQUITY: "Equity",
-    REVENUE: "Revenue",
+    INCOME: "Income",
     EXPENSES: "Expenses",
     OCI: "Other Comprehensive Income",
+    OTHER: "Other",
   };
 
-  // Add whitespace indentation
-  const indent = (level: number) => `pl-${Math.min(level * 4, 32)}`;
-
   return (
-    <div className="bg-white border rounded p-6 shadow-sm space-y-4">
-      <h3 className="text-xl font-bold">{sectionName}</h3>
+    <div className="space-y-8">
+      {/* Title */}
+      <h2 className="text-xl font-bold">
+        {statement_type === "SOFP" && "Statement of Financial Position"}
+        {statement_type === "P&L" && "Profit or Loss"}
+        {statement_type === "OCI" && "Other Comprehensive Income"}
+        {statement_type === "EQUITY" && "Statement of Changes in Equity"}
+      </h2>
 
-      <table className="w-full text-sm">
-        <tbody>
-          {lines.map((line, idx) => {
-            const isGroup = line.level === 0 && !line.is_subtotal;
-            const isSubtotal = line.is_subtotal;
+      {/* Render Sections */}
+      {Object.entries(grouped).map(([section, rows]) => (
+        <StatementSection
+          key={section}
+          title={SECTION_NAMES[section] ?? section}
+        >
+          <table className="w-full text-sm">
+            <tbody>
+              {rows.map((line, idx) => {
+                const isGroup = line.level === 0 && !line.is_subtotal;
+                const isSubtotal = !!line.is_subtotal;
 
-            // -------------------------
-            // SECTION HEADER
-            // -------------------------
-            const maybeSectionHeader =
-              line.section &&
-              lines[idx - 1]?.section !== line.section &&
-              !line.is_subtotal &&
-              line.level === 0;
-
-            // -------------------------
-            // COLLAPSE VISIBILITY
-            // -------------------------
-            let visible = true;
-
-            if (line.level > 0) {
-              // find nearest level 0 parent
-              for (let j = idx - 1; j >= 0; j--) {
-                if (lines[j].level === 0) {
-                  const parentCode = lines[j].code;
-                  if (collapsed[parentCode]) visible = false;
-                  break;
-                }
-              }
-            }
-            if (!visible) return null;
-
-            return (
-              <React.Fragment key={line.account_id}>
-                {/* SECTION HEADER ROW */}
-                {maybeSectionHeader && (
-                <tr>
-                    <td
-                    colSpan={2}
-                    className="pt-4 pb-2 text-gray-700 font-semibold text-md"
-                    >
-                    {line.section &&
-                    sectionHeaders[line.section as keyof typeof sectionHeaders]
-                        ? sectionHeaders[line.section as keyof typeof sectionHeaders]
-                        : line.section}
-                    </td>
-                </tr>
-                )}
-
-
-                {/* NORMAL / GROUP / SUBTOTAL ROW */}
-                <tr
-                  className={
-                    isSubtotal
-                      ? "font-bold bg-gray-50 border-t border-gray-300"
-                      : "border-gray-100"
+                // Determine visibility based on parent collapse
+                let visible = true;
+                if (line.level > 0) {
+                  for (let j = idx - 1; j >= 0; j--) {
+                    if (rows[j].level === 0) {
+                      const parent = rows[j];
+                      if (collapsed[parent.code]) visible = false;
+                      break;
+                    }
                   }
-                >
-                  <td
-                    className={`py-1 flex items-center ${indent(
-                      line.level
-                    )}`}
+                }
+
+                if (!visible) return null;
+
+                return (
+                  <tr
+                    key={line.account_id + line.code}
+                    className={isSubtotal ? "font-bold bg-gray-50" : ""}
                   >
-                    {/* Expand/collapse toggle */}
-                    {isGroup && (
-                      <button
-                        onClick={() => toggle(line.code)}
-                        className="mr-2 text-xs text-blue-600"
-                      >
-                        {collapsed[line.code] ? "▶" : "▼"}
-                      </button>
-                    )}
-
-                    {/* Name */}
-                    <span>
+                    <td className={`py-1 ${indent(line.level)}`}>
+                      {isGroup && (
+                        <button
+                          className="mr-2 text-xs text-blue-600"
+                          onClick={() => toggle(line.code)}
+                        >
+                          {collapsed[line.code] ? "▶" : "▼"}
+                        </button>
+                      )}
                       {line.code} — {line.name}
-                    </span>
-                  </td>
+                    </td>
 
-                  {/* Amount */}
-                  <td className="py-1 text-right font-medium">
-                    {Number(line.amount).toLocaleString()}
-                  </td>
-                </tr>
-              </React.Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                    <td className="py-1 text-right font-medium">
+                      {Number(line.amount).toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </StatementSection>
+      ))}
     </div>
   );
 }
