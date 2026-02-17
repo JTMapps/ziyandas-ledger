@@ -8,6 +8,7 @@ import { supabase } from "../../lib/supabase";
 import {
   BUSINESS_CHART_OF_ACCOUNTS,
   AppliedAccount as BusinessApplied,
+  TemplateAccount,
 } from "./business/businessChartOfAccounts";
 
 import {
@@ -20,10 +21,27 @@ import { PersonalCaptureRules } from "./personal/personalCaptureRules";
 
 import { EventOrchestrator } from "../../orchestrators/EventOrchestrator";
 
+import {
+  RETAIL_COA,
+  MANUFACTURING_COA,
+  SERVICES_COA,
+  REAL_ESTATE_COA,
+  HOSPITALITY_COA,
+  IndustryTemplateKind,
+} from "./industry";
+
 // Combined type so hooks & UI can treat all accounts uniformly
 export type AppliedAccount = BusinessApplied | PersonalApplied;
 
-export type TemplateKind = "BUSINESS" | "PERSONAL";
+export type TemplateKind =
+  | "BUSINESS"
+  | "PERSONAL"
+  | "RETAIL"
+  | "MANUFACTURING"
+  | "SERVICES"
+  | "REAL_ESTATE"
+  | "HOSPITALITY";
+
 
 export interface ApplyTemplateResult {
   template_group_id: string;
@@ -37,16 +55,30 @@ export interface ApplyTemplateResult {
 
 export async function assignTemplateToEntity(
   entityId: string,
-  entityType: "Business" | "Personal"
+  kind: TemplateKind
 ): Promise<string> {
+  const map: Record<TemplateKind, string> = {
+    BUSINESS: "Business",
+    PERSONAL: "Personal",
+
+    RETAIL: "Business",
+    MANUFACTURING: "Business",
+    SERVICES: "Business",
+    REAL_ESTATE: "Business",
+    HOSPITALITY: "Business",
+  };
+
+  const p_entity_type = map[kind];
+
   const { data, error } = await supabase.rpc("assign_template_to_entity", {
     p_entity_id: entityId,
-    p_entity_type: entityType,
+    p_entity_type,
   });
 
   if (error) throw error;
-  return data; // template_group_id
+  return data;
 }
+
 
 // ---------------------------------------------------------------------------
 // STEP 2 — APPLY TEMPLATE (generate accounts inside `accounts` table)
@@ -131,13 +163,33 @@ export async function getEntityTemplateKind(
 ): Promise<TemplateKind> {
   const { data, error } = await supabase
     .from("entities")
-    .select("type")
+    .select("type, industry_type")
     .eq("id", entityId)
     .single();
 
   if (error) throw error;
 
-  return data.type === "Business" ? "BUSINESS" : "PERSONAL";
+  if (data.type === "Personal") return "PERSONAL";
+  if (data.type === "Business") {
+    // Check industry-specific override
+    if (data.industry_type) {
+      const map: Record<string, TemplateKind> = {
+        Retail: "RETAIL",
+        Manufacturing: "MANUFACTURING",
+        Services: "SERVICES",
+        RealEstate: "REAL_ESTATE",
+        Hospitality: "HOSPITALITY",
+      };
+
+      if (map[data.industry_type]) return map[data.industry_type];
+    }
+
+    // default fallback
+    return "BUSINESS";
+  }
+
+  // fallback
+  return "BUSINESS";
 }
 
 // ---------------------------------------------------------------------------
@@ -266,26 +318,48 @@ export const TemplateJournalEngine = {
 };
 
 // ---------------------------------------------------------------------------
+// TEMPLATE REGISTRY — maps TemplateKind → Chart of Accounts definition
+// ---------------------------------------------------------------------------
+export const TEMPLATE_REGISTRY: Record<TemplateKind, TemplateAccount[]> = {
+  BUSINESS: BUSINESS_CHART_OF_ACCOUNTS,
+  PERSONAL: PERSONAL_CHART_OF_ACCOUNTS,
+
+  RETAIL: RETAIL_COA,
+  MANUFACTURING: MANUFACTURING_COA,
+  SERVICES: SERVICES_COA,
+  REAL_ESTATE: REAL_ESTATE_COA,
+  HOSPITALITY: HOSPITALITY_COA,
+};
+
+// ---------------------------------------------------------------------------
 // STEP 7 — HIGH LEVEL TEMPLATE FLOW CALLED BY UI
 // ---------------------------------------------------------------------------
 
 export async function setupEntityTemplate(entityId: string) {
-  // 1. Determine type
+  // 1. Determine template kind
   const kind = await getEntityTemplateKind(entityId);
 
-  // 2. Assign template group
-  const templateGroupId = await assignTemplateToEntity(
-    entityId,
-    kind === "BUSINESS" ? "Business" : "Personal"
-  );
+  // 2. Assign template group (assignTemplateToEntity does the mapping)
+  const templateGroupId = await assignTemplateToEntity(entityId, kind);
 
   // 3. Apply template → materialize accounts
   const applied = await applyTemplateToEntity(entityId);
 
-  // 4. Return everything for the UI
   return {
     kind,
     template_group_id: templateGroupId,
     accounts_created: applied.accounts_created,
   };
 }
+
+export function getTemplateDefinition(kind: TemplateKind): TemplateAccount[] {
+  return TEMPLATE_REGISTRY[kind];
+}
+
+export const IndustryCaptureRules = {
+  RETAIL: {},
+  MANUFACTURING: {},
+  SERVICES: {},
+  REAL_ESTATE: {},
+  HOSPITALITY: {},
+};
