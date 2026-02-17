@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 
-import DashboardLayout from "../layout/DashboardLayout";
+import DashboardLayout from "../components/layout/DashboardLayout";
 
 import OverviewPage from "./dashboard/OverviewPage";
 import LedgerPage from "./dashboard/LedgerPage";
