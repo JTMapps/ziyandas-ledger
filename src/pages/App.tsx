@@ -1,29 +1,50 @@
+// src/pages/App.tsx
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
+
 import { supabase } from "../lib/supabase";
 
 import AuthPage from "./AuthPage";
 import EntityGate from "./EntityGate";
+import EntityCreatePage from "./entity//EntityCreatePage";
 import EntityTemplateSetup from "./entity/EntityTemplateSetup";
 import ProfilePage from "./ProfilePage";
 import EntityDashboard from "./EntityDashboard";
-import type { Session } from "@supabase/supabase-js";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
+    let mounted = true;
+
+    // Initial session fetch
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) console.error("getSession error:", error);
+        setSession(data.session);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        console.error("getSession exception:", e);
+        setSession(null);
+        setLoading(false);
+      });
+
+    // Auth state listener
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => setSession(session)
-    );
-
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -34,21 +55,31 @@ export default function App() {
     );
   }
 
+  // Unauthenticated app surface:
+  // keep /auth routable, but default to AuthPage
   if (!session) {
-    return <AuthPage />;
+    return (
+      <Routes>
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="*" element={<Navigate to="/auth" replace />} />
+      </Routes>
+    );
   }
 
+  // Authenticated app surface
   return (
     <Routes>
-  <Route path="/auth" element={<AuthPage />} />
-  <Route path="/" element={<EntityGate />} />
-  <Route path="/entities/new" element={<EntityTemplateSetup />} />
-  <Route path="/profile" element={<ProfilePage />} />
+      <Route path="/auth" element={<Navigate to="/" replace />} />
+      <Route path="/" element={<EntityGate />} />
+      <Route path="/entities/new" element={<EntityCreatePage />} />
+      <Route path="/entities/:entityId/template" element={<EntityTemplateSetup />} />
 
-  {/* Unified enterprise dashboard */}
-  <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
+      <Route path="/profile" element={<ProfilePage />} />
 
-  <Route path="*" element={<Navigate to="/" replace />} />
-</Routes>
+      {/* Unified enterprise dashboard */}
+      <Route path="/entities/:entityId/*" element={<EntityDashboard />} />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

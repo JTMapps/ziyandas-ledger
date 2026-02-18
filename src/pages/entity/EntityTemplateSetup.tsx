@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
@@ -15,69 +15,123 @@ import IndustryHospitalityPreview from "../../components/templates/IndustryHospi
 
 import {
   setupEntityTemplate,
-  getEntityTemplateKind,
+  deriveTemplateKindFromEntity,
   TemplateKind,
 } from "../../domain/templates/TemplateOrchestrator";
 
+type EntityRow = {
+  id: string;
+  name: string;
+  type: "Business" | "Personal";
+  industry_type?: string | null;
+};
+
 export default function EntityTemplateSetup() {
-  const { entityId } = useParams();
+  const params = useParams();
+  const entityId = params.entityId;
   const navigate = useNavigate();
 
-  const [selected, setSelected] = useState<TemplateKind | null>(null);
+  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
+  const id: string = entityId; // ✅ narrow
 
-  if (!entityId) return <div>No entity found.</div>;
+  const [selected, setSelected] = useState<TemplateKind | null>(null);
 
   // ----------------------------------------------------------
   // Load entity metadata
   // ----------------------------------------------------------
-  const entityQuery = useQuery({
-    queryKey: ["entity", entityId],
+  const entityQuery = useQuery<EntityRow>({
+    queryKey: ["entity", id],
+    enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("entities")
         .select("id, name, type, industry_type")
-        .eq("id", entityId)
+        .eq("id", id)
         .single();
+
       if (error) throw error;
-      return data;
+      return data as EntityRow;
     },
   });
 
-  const templateStatusQuery = useQuery({
-    queryKey: ["entity-template", entityId],
+  // ----------------------------------------------------------
+  // Has template already been applied?
+  // ----------------------------------------------------------
+  const templateStatusQuery = useQuery<{ template_group_id: string } | null>({
+    queryKey: ["entity-template", id],
+    enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("entity_template_selection")
         .select("template_group_id")
-        .eq("entity_id", entityId)
+        .eq("entity_id", id)
         .single();
 
-      if (error && error.code !== "PGRST116") {
-        throw error;
-      }
-      return data;
+      // PGRST116 = no rows found (acceptable)
+      if (error && (error as any).code !== "PGRST116") throw error;
+      return (data ?? null) as { template_group_id: string } | null;
     },
   });
 
   // ----------------------------------------------------------
-  // Auto-redirect if entity already has a template
+  // If already templated, redirect to overview
   // ----------------------------------------------------------
   useEffect(() => {
+    if (templateStatusQuery.isLoading) return;
     if (templateStatusQuery.data?.template_group_id) {
-      navigate(`/entities/${entityId}/overview`, { replace: true });
+      navigate(`/entities/${id}/overview`, { replace: true });
     }
-  }, [templateStatusQuery.data, entityId, navigate]);
+  }, [templateStatusQuery.isLoading, templateStatusQuery.data, id, navigate]);
 
+  // ----------------------------------------------------------
+  // Auto-suggest a template based on entity row (sync)
+  // ----------------------------------------------------------
+  useEffect(() => {
+    if (!entityQuery.data) return;
+    if (selected) return; // user already chose manually
+    setSelected(deriveTemplateKindFromEntity(entityQuery.data));
+  }, [entityQuery.data, selected]);
+
+  // ----------------------------------------------------------
+  // Apply template
+  // ----------------------------------------------------------
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("Select a template first");
-      return setupEntityTemplate(entityId);
+
+      // ✅ Persist industry_type to entities BEFORE applying template
+      // Must match your DB enum values exactly
+      const INDUSTRY_TYPE_BY_KIND: Record<TemplateKind, string | null> = {
+        BUSINESS: "Generic",
+        PERSONAL: null,
+
+        RETAIL: "Retail",
+        MANUFACTURING: "Manufacturing",
+        SERVICES: "Services",
+        REAL_ESTATE: "RealEstate",
+        HOSPITALITY: "Hospitality",
+      };
+
+      const industry_type = INDUSTRY_TYPE_BY_KIND[selected] ?? null;
+
+      const { error: updateErr } = await supabase
+        .from("entities")
+        .update({ industry_type })
+        .eq("id", id);
+
+      if (updateErr) throw updateErr;
+
+      // ✅ Now assign + apply the selected template group
+      return setupEntityTemplate(id, selected);
     },
     onSuccess: () => {
-      navigate(`/entities/${entityId}/overview`, { replace: true });
+      navigate(`/entities/${id}/overview`, { replace: true });
     },
   });
 
+  // ----------------------------------------------------------
+  // Loading / error states
+  // ----------------------------------------------------------
   if (entityQuery.isLoading || templateStatusQuery.isLoading) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -86,101 +140,24 @@ export default function EntityTemplateSetup() {
     );
   }
 
+  if (entityQuery.error) {
+    return (
+      <div className="p-4 text-red-600">
+        Failed to load entity:{" "}
+        {String((entityQuery.error as any)?.message ?? entityQuery.error)}
+      </div>
+    );
+  }
+
   const entity = entityQuery.data;
-  if (!entity) return <div>Entity not found</div>;
+  if (!entity) return <div className="p-4">Entity not found.</div>;
 
   const isBusiness = entity.type === "Business";
 
   // ----------------------------------------------------------
-  // BUTTON GROUP
+  // Preview
   // ----------------------------------------------------------
-  const businessButtons = (
-    <>
-      <button
-        onClick={() => setSelected("BUSINESS")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "BUSINESS"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Business (Standard IFRS)
-      </button>
-
-      <button
-        onClick={() => setSelected("RETAIL")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "RETAIL"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Retail Industry
-      </button>
-
-      <button
-        onClick={() => setSelected("MANUFACTURING")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "MANUFACTURING"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Manufacturing
-      </button>
-
-      <button
-        onClick={() => setSelected("SERVICES")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "SERVICES"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Professional Services
-      </button>
-
-      <button
-        onClick={() => setSelected("REAL_ESTATE")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "REAL_ESTATE"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Real Estate
-      </button>
-
-      <button
-        onClick={() => setSelected("HOSPITALITY")}
-        className={`px-6 py-3 rounded border text-sm font-medium ${
-          selected === "HOSPITALITY"
-            ? "bg-black text-white"
-            : "bg-white hover:bg-gray-100"
-        }`}
-      >
-        Hospitality
-      </button>
-    </>
-  );
-
-  const personalButtons = (
-    <button
-      onClick={() => setSelected("PERSONAL")}
-      className={`px-6 py-3 rounded border text-sm font-medium ${
-        selected === "PERSONAL"
-          ? "bg-black text-white"
-          : "bg-white hover:bg-gray-100"
-      }`}
-    >
-      Personal Finance Template
-    </button>
-  );
-
-  // ----------------------------------------------------------
-  // TEMPLATE PREVIEW SELECTOR
-  // ----------------------------------------------------------
-  function renderPreview() {
+  const preview = useMemo(() => {
     switch (selected) {
       case "BUSINESS":
         return <BusinessTemplatePreview />;
@@ -199,7 +176,7 @@ export default function EntityTemplateSetup() {
       default:
         return null;
     }
-  }
+  }, [selected]);
 
   // ----------------------------------------------------------
   // UI
@@ -208,7 +185,8 @@ export default function EntityTemplateSetup() {
     <div className="min-h-screen bg-gray-50 p-8 flex flex-col items-center">
       <div className="w-full max-w-3xl bg-white shadow-lg border rounded p-8 space-y-8">
         <h1 className="text-2xl font-bold">
-          Select Template for <span className="text-blue-600">{entity.name}</span>
+          Select Template for{" "}
+          <span className="text-blue-600">{entity.name}</span>
         </h1>
 
         <p className="text-gray-600">
@@ -216,17 +194,53 @@ export default function EntityTemplateSetup() {
           configure IFRS-compliant accounts tailored to your business model.
         </p>
 
-        {/* Dynamic button rendering */}
         <div className="flex flex-wrap gap-4">
-          {isBusiness ? businessButtons : personalButtons}
+          {isBusiness ? (
+            <>
+              <TemplateButton
+                label="Business (Standard IFRS)"
+                active={selected === "BUSINESS"}
+                onClick={() => setSelected("BUSINESS")}
+              />
+              <TemplateButton
+                label="Retail Industry"
+                active={selected === "RETAIL"}
+                onClick={() => setSelected("RETAIL")}
+              />
+              <TemplateButton
+                label="Manufacturing"
+                active={selected === "MANUFACTURING"}
+                onClick={() => setSelected("MANUFACTURING")}
+              />
+              <TemplateButton
+                label="Professional Services"
+                active={selected === "SERVICES"}
+                onClick={() => setSelected("SERVICES")}
+              />
+              <TemplateButton
+                label="Real Estate"
+                active={selected === "REAL_ESTATE"}
+                onClick={() => setSelected("REAL_ESTATE")}
+              />
+              <TemplateButton
+                label="Hospitality"
+                active={selected === "HOSPITALITY"}
+                onClick={() => setSelected("HOSPITALITY")}
+              />
+            </>
+          ) : (
+            <TemplateButton
+              label="Personal Finance Template"
+              active={selected === "PERSONAL"}
+              onClick={() => setSelected("PERSONAL")}
+            />
+          )}
         </div>
 
-        {/* PREVIEW */}
         {selected && (
-          <div className="border rounded p-6 bg-gray-50">{renderPreview()}</div>
+          <div className="border rounded p-6 bg-gray-50">{preview}</div>
         )}
 
-        {/* APPLY BUTTON */}
         <button
           disabled={!selected || applyMutation.isPending}
           onClick={() => applyMutation.mutate()}
@@ -241,10 +255,31 @@ export default function EntityTemplateSetup() {
 
         {applyMutation.error && (
           <div className="text-red-600 text-sm">
-            {(applyMutation.error as any).message}
+            {String((applyMutation.error as any)?.message ?? applyMutation.error)}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function TemplateButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 rounded border text-sm font-medium ${
+        active ? "bg-black text-white" : "bg-white hover:bg-gray-100"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

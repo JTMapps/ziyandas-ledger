@@ -1,49 +1,54 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useParams } from "react-router-dom";
+
 import { supabase } from "../../lib/supabase";
 import JournalEntryModal from "../../components/events/JournalEntryModal";
 import { useEconomicEvents } from "../../hooks/useEconomicEvents";
 
-interface Props {
-  entityId: string;
-}
+type LedgerEventRow = {
+  id: string;
+  event_date: string;
+  description: string | null;
+  event_type: string | null;
+  created_at: string;
+};
 
-export default function LedgerPage({ entityId }: Props) {
+export default function LedgerPage() {
+  const { entityId } = useParams<{ entityId: string }>();
+
+  if (!entityId) {
+    return <div className="p-4">Missing entityId in route.</div>;
+  }
+
   const { recordEconomicEvent, loading, error } = useEconomicEvents();
   const [showModal, setShowModal] = useState(false);
 
-  // ---------------------------------------------------------
-  // LOAD ECONOMIC EVENTS (enterprise schema)
-  // ---------------------------------------------------------
-  const {
-    data: events,
-    refetch,
-    isLoading
-  } = useQuery({
+  const { data: events, refetch, isLoading } = useQuery<LedgerEventRow[]>({
     queryKey: ["economic-events", entityId],
+    enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("economic_events")
-        .select(`
-            id,
-            event_date,
-            description,
-            event_type,
-            created_at
-        `)
+        .select(
+          `
+          id,
+          event_date,
+          description,
+          event_type,
+          created_at
+        `
+        )
         .eq("entity_id", entityId)
         .order("event_date", { ascending: false });
 
       if (error) throw error;
-      return data;
-    }
+      return (data ?? []) as LedgerEventRow[];
+    },
   });
 
   return (
     <div className="space-y-8">
-      {/* ----------------------------------------------------- */}
-      {/* PAGE HEADER                                           */}
-      {/* ----------------------------------------------------- */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Ledger / Economic Events</h2>
 
@@ -55,22 +60,16 @@ export default function LedgerPage({ entityId }: Props) {
         </button>
       </div>
 
-      {/* ----------------------------------------------------- */}
-      {/* JOURNAL ENTRY MODAL                                   */}
-      {/* ----------------------------------------------------- */}
       {showModal && (
         <JournalEntryModal
           entityId={entityId}
           onClose={() => {
             setShowModal(false);
-            refetch(); // refresh ledger list
+            refetch();
           }}
         />
       )}
 
-      {/* ----------------------------------------------------- */}
-      {/* EVENTS TABLE                                          */}
-      {/* ----------------------------------------------------- */}
       <div className="bg-white border rounded shadow-sm overflow-hidden">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-100 border-b">
@@ -100,7 +99,7 @@ export default function LedgerPage({ entityId }: Props) {
               </tr>
             ))}
 
-            {!isLoading && events?.length === 0 && (
+            {!isLoading && (events?.length ?? 0) === 0 && (
               <tr>
                 <td colSpan={4} className="text-center p-4 text-gray-500">
                   No events recorded yet.

@@ -1,29 +1,38 @@
 import { useState } from "react";
+import { useParams } from "react-router-dom";
 import { useYearEnd } from "../../hooks/useYearEnd";
 
-interface Props {
-  entityId: string;
-}
+export default function YearEndPage() {
+  const params = useParams<{ entityId: string }>();
+  const entityId = params.entityId;
 
-export default function YearEndPage({ entityId }: Props) {
+  if (!entityId) {
+    return <div className="p-4">Missing entityId in route.</div>;
+  }
+
+  // ✅ Narrow to a guaranteed string for TypeScript
+  const id: string = entityId;
+
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [log, setLog] = useState<string[]>([]);
-
   const { runFullYearEndClose } = useYearEnd();
 
   async function handleRun() {
     setLog((l) => [...l, `Running year-end for ${year}…`]);
 
-    const result = await runFullYearEndClose(entityId, year);
-
-    setLog((l) => [...l, `✔ Year-end complete: ${JSON.stringify(result)}`]);
+    try {
+      const result = await runFullYearEndClose(id, year);
+      setLog((l) => [...l, `✔ Year-end complete: ${JSON.stringify(result)}`]);
+    } catch (e: any) {
+      setLog((l) => [...l, `✖ Year-end failed: ${String(e?.message ?? e)}`]);
+    }
   }
 
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-bold">Year-End Close</h2>
 
-      <div className="flex space-x-4">
+      <div className="flex space-x-4 items-center">
         <input
           type="number"
           value={year}

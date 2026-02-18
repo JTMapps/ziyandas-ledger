@@ -4,22 +4,24 @@ import IndustryOperationHeader from "../../components/industry/IndustryOperation
 import { TemplateJournalEngine } from "../../domain/templates/TemplateOrchestrator";
 
 export default function HospitalityMealServiceWizard() {
-  const { entityId } = useParams();
+  const params = useParams();
+  const entityId = params.entityId;
   const navigate = useNavigate();
 
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
 
-  if (!entityId) return <div>No entity.</div>;
+  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
+  const id: string = entityId;
 
   async function submit() {
     await TemplateJournalEngine.industry.hospitality.serviceMeal(
-      entityId!,
+      id,
       Number(amount),
-      description
+      description || undefined
     );
 
-    navigate(`/entities/${entityId}/overview`);
+    navigate(`/entities/${id}/overview`);
   }
 
   return (
@@ -30,7 +32,6 @@ export default function HospitalityMealServiceWizard() {
       />
 
       <div className="space-y-4 mt-4">
-
         <div>
           <label className="text-sm font-medium">Meal Service Amount</label>
           <input

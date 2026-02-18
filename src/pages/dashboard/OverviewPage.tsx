@@ -1,6 +1,5 @@
-// src/pages/dashboard/OverviewPage.tsx
-
 import { useQuery } from "@tanstack/react-query";
+import { useParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 
 interface KPIResult {
@@ -8,38 +7,32 @@ interface KPIResult {
   value: number | string | null;
 }
 
-interface Props {
-  entityId: string;
-}
+export default function OverviewPage() {
+  const { entityId } = useParams<{ entityId: string }>();
 
-export default function OverviewPage({ entityId }: Props) {
-  const {
-    data: kpis,
-    isLoading,
-    isError,
-    error
-  } = useQuery<KPIResult[]>({
+  if (!entityId) {
+    return <div className="p-4">Missing entityId in route.</div>;
+  }
+
+  const { data: kpis, isLoading, isError, error } = useQuery<KPIResult[]>({
     queryKey: ["overview-kpis", entityId],
+    enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_entity_snapshot", {
-        p_entity_id: entityId
+        p_entity_id: entityId,
       });
 
       if (error) throw error;
-
-      // Ensure always an array
-      return Array.isArray(data) ? data : [];
-    }
+      return Array.isArray(data) ? (data as KPIResult[]) : [];
+    },
   });
 
-  if (isLoading) {
-    return <div className="p-4">Loading KPI data…</div>;
-  }
+  if (isLoading) return <div className="p-4">Loading KPI data…</div>;
 
   if (isError) {
     return (
       <div className="p-4 text-red-600">
-        Failed to load KPIs: {(error as any).message}
+        Failed to load KPIs: {String((error as any)?.message ?? error)}
       </div>
     );
   }
@@ -47,24 +40,21 @@ export default function OverviewPage({ entityId }: Props) {
   if (!kpis || kpis.length === 0) {
     return (
       <div className="p-4 text-gray-600">
-        No KPI data available.  
+        No KPI data available.
         <br />
         Try generating a snapshot or adding economic events.
       </div>
     );
   }
 
-  // Formatting helper
   const formatValue = (v: any) => {
     if (v === null || v === undefined) return "—";
-
     if (typeof v === "number") {
       return v.toLocaleString("en-ZA", {
         minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        maximumFractionDigits: 2,
       });
     }
-
     return v;
   };
 
@@ -79,9 +69,7 @@ export default function OverviewPage({ entityId }: Props) {
             className="border rounded p-4 bg-white shadow-sm flex flex-col"
           >
             <div className="text-sm text-gray-500">{k.label}</div>
-            <div className="text-2xl font-bold mt-1">
-              {formatValue(k.value)}
-            </div>
+            <div className="text-2xl font-bold mt-1">{formatValue(k.value)}</div>
           </div>
         ))}
       </div>
