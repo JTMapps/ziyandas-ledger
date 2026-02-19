@@ -141,21 +141,25 @@ export async function assignTemplateToEntity(
 
 // ---------------------------------------------------------------------------
 // STEP 2 — APPLY TEMPLATE (materialize accounts from templates)
+// ✅ must pass BOTH p_entity_id + p_template_group_id (matches DB function)
 // ---------------------------------------------------------------------------
-export async function applyTemplateToEntity(entityId: string): Promise<ApplyTemplateResult> {
-  const { data, error } = await supabase.rpc("apply_template_to_entity", {
+export async function applyTemplateToEntity(
+  entityId: string,
+  templateGroupId: string
+): Promise<void> {
+  if (!templateGroupId) {
+    throw new Error("applyTemplateToEntity: templateGroupId is missing/empty.");
+  }
+
+  const { error } = await supabase.rpc("apply_template_to_entity", {
     p_entity_id: entityId,
+    p_template_group_id: templateGroupId,
   });
 
   if (error) {
     console.error("apply_template_to_entity failed:", error);
     throw error;
   }
-
-  return {
-    template_group_id: data.template_group_id,
-    accounts_created: data.accounts_created,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -368,18 +372,22 @@ export function getTemplateDefinition(kind: TemplateKind): TemplateAccount[] {
   return TEMPLATE_REGISTRY[kind];
 }
 
-// ---------------------------------------------------------------------------
 // STEP 7 — HIGH LEVEL SETUP FLOW (selected kind)
 // ---------------------------------------------------------------------------
-
-
 export async function setupEntityTemplate(entityId: string, kind: TemplateKind) {
   const templateGroupId = await assignTemplateToEntity(entityId, kind);
-  const applied = await applyTemplateToEntity(entityId);
+
+  if (!templateGroupId) {
+    throw new Error(
+      `setupEntityTemplate: assignTemplateToEntity returned empty templateGroupId for kind=${kind}`
+    );
+  }
+
+  await applyTemplateToEntity(entityId, templateGroupId);
 
   return {
     kind,
     template_group_id: templateGroupId,
-    accounts_created: applied.accounts_created,
+    accounts_created: null,
   };
 }

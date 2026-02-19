@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+// src/pages/entity/EntityTemplateSetup.tsx
+
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
@@ -26,22 +28,81 @@ type EntityRow = {
   industry_type?: string | null;
 };
 
+function TemplateButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 rounded border text-sm font-medium ${
+        active ? "bg-black text-white" : "bg-white hover:bg-gray-100"
+      }`}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function renderPreview(kind: TemplateKind | null) {
+  switch (kind) {
+    case "BUSINESS":
+      return <BusinessTemplatePreview />;
+    case "PERSONAL":
+      return <PersonalTemplatePreview />;
+    case "RETAIL":
+      return <IndustryRetailPreview />;
+    case "MANUFACTURING":
+      return <IndustryManufacturingPreview />;
+    case "SERVICES":
+      return <IndustryServicesPreview />;
+    case "REAL_ESTATE":
+      return <IndustryRealEstatePreview />;
+    case "HOSPITALITY":
+      return <IndustryHospitalityPreview />;
+    default:
+      return null;
+  }
+}
+
+/**
+ * NOTE:
+ * This mapping must match your DB enum values exactly.
+ * If your DB stores "Real Estate" (with a space) instead of "RealEstate", change it here.
+ */
+const INDUSTRY_TYPE_BY_KIND: Record<TemplateKind, string | null> = {
+  BUSINESS: "Generic",
+  PERSONAL: null,
+
+  RETAIL: "Retail",
+  MANUFACTURING: "Manufacturing",
+  SERVICES: "Services",
+  REAL_ESTATE: "RealEstate",
+  HOSPITALITY: "Hospitality",
+};
+
 export default function EntityTemplateSetup() {
-  const params = useParams();
-  const entityId = params.entityId;
+  const { entityId } = useParams<{ entityId: string }>();
   const navigate = useNavigate();
 
-  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
-  const id: string = entityId; // ✅ narrow
-
+  // ✅ Always call hooks first (no early returns before hooks)
   const [selected, setSelected] = useState<TemplateKind | null>(null);
+
+  // Safe id for queries (enabled prevents execution when missing)
+  const id = entityId ?? "";
 
   // ----------------------------------------------------------
   // Load entity metadata
   // ----------------------------------------------------------
   const entityQuery = useQuery<EntityRow>({
     queryKey: ["entity", id],
-    enabled: !!id,
+    enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("entities")
@@ -59,7 +120,7 @@ export default function EntityTemplateSetup() {
   // ----------------------------------------------------------
   const templateStatusQuery = useQuery<{ template_group_id: string } | null>({
     queryKey: ["entity-template", id],
-    enabled: !!id,
+    enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("entity_template_selection")
@@ -69,6 +130,7 @@ export default function EntityTemplateSetup() {
 
       // PGRST116 = no rows found (acceptable)
       if (error && (error as any).code !== "PGRST116") throw error;
+
       return (data ?? null) as { template_group_id: string } | null;
     },
   });
@@ -77,18 +139,27 @@ export default function EntityTemplateSetup() {
   // If already templated, redirect to overview
   // ----------------------------------------------------------
   useEffect(() => {
+    if (!entityId) return;
     if (templateStatusQuery.isLoading) return;
+
     if (templateStatusQuery.data?.template_group_id) {
       navigate(`/entities/${id}/overview`, { replace: true });
     }
-  }, [templateStatusQuery.isLoading, templateStatusQuery.data, id, navigate]);
+  }, [
+    entityId,
+    templateStatusQuery.isLoading,
+    templateStatusQuery.data,
+    id,
+    navigate,
+  ]);
 
   // ----------------------------------------------------------
-  // Auto-suggest a template based on entity row (sync)
+  // Auto-suggest a template based on entity row
   // ----------------------------------------------------------
   useEffect(() => {
     if (!entityQuery.data) return;
     if (selected) return; // user already chose manually
+
     setSelected(deriveTemplateKindFromEntity(entityQuery.data));
   }, [entityQuery.data, selected]);
 
@@ -97,31 +168,25 @@ export default function EntityTemplateSetup() {
   // ----------------------------------------------------------
   const applyMutation = useMutation({
     mutationFn: async () => {
+      if (!entityId) throw new Error("Missing entityId in route.");
       if (!selected) throw new Error("Select a template first");
 
-      // ✅ Persist industry_type to entities BEFORE applying template
-      // Must match your DB enum values exactly
-      const INDUSTRY_TYPE_BY_KIND: Record<TemplateKind, string | null> = {
-        BUSINESS: "Generic",
-        PERSONAL: null,
-
-        RETAIL: "Retail",
-        MANUFACTURING: "Manufacturing",
-        SERVICES: "Services",
-        REAL_ESTATE: "RealEstate",
-        HOSPITALITY: "Hospitality",
-      };
-
+      // If Business entity picks an industry template, persist industry_type
+      // (This is optional for Personal; we keep it null.)
       const industry_type = INDUSTRY_TYPE_BY_KIND[selected] ?? null;
 
-      const { error: updateErr } = await supabase
-        .from("entities")
-        .update({ industry_type })
-        .eq("id", id);
+      // Only update industry_type for Business-type entities
+      // (prevents accidental updates for Personal entities)
+      if (selected !== "PERSONAL") {
+        const { error: updateErr } = await supabase
+          .from("entities")
+          .update({ industry_type })
+          .eq("id", id);
 
-      if (updateErr) throw updateErr;
+        if (updateErr) throw updateErr;
+      }
 
-      // ✅ Now assign + apply the selected template group
+      // Assign + apply template group in DB
       return setupEntityTemplate(id, selected);
     },
     onSuccess: () => {
@@ -130,8 +195,12 @@ export default function EntityTemplateSetup() {
   });
 
   // ----------------------------------------------------------
-  // Loading / error states
+  // UI states (safe after hooks)
   // ----------------------------------------------------------
+  if (!entityId) {
+    return <div className="p-4">Missing entityId in route.</div>;
+  }
+
   if (entityQuery.isLoading || templateStatusQuery.isLoading) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -153,34 +222,8 @@ export default function EntityTemplateSetup() {
   if (!entity) return <div className="p-4">Entity not found.</div>;
 
   const isBusiness = entity.type === "Business";
+  const preview = renderPreview(selected);
 
-  // ----------------------------------------------------------
-  // Preview
-  // ----------------------------------------------------------
-  const preview = useMemo(() => {
-    switch (selected) {
-      case "BUSINESS":
-        return <BusinessTemplatePreview />;
-      case "PERSONAL":
-        return <PersonalTemplatePreview />;
-      case "RETAIL":
-        return <IndustryRetailPreview />;
-      case "MANUFACTURING":
-        return <IndustryManufacturingPreview />;
-      case "SERVICES":
-        return <IndustryServicesPreview />;
-      case "REAL_ESTATE":
-        return <IndustryRealEstatePreview />;
-      case "HOSPITALITY":
-        return <IndustryHospitalityPreview />;
-      default:
-        return null;
-    }
-  }, [selected]);
-
-  // ----------------------------------------------------------
-  // UI
-  // ----------------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50 p-8 flex flex-col items-center">
       <div className="w-full max-w-3xl bg-white shadow-lg border rounded p-8 space-y-8">
@@ -249,6 +292,7 @@ export default function EntityTemplateSetup() {
               ? "bg-blue-600 hover:bg-blue-700"
               : "bg-gray-400 cursor-not-allowed"
           }`}
+          type="button"
         >
           {applyMutation.isPending ? "Applying Template…" : "Apply Template"}
         </button>
@@ -260,26 +304,5 @@ export default function EntityTemplateSetup() {
         )}
       </div>
     </div>
-  );
-}
-
-function TemplateButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-6 py-3 rounded border text-sm font-medium ${
-        active ? "bg-black text-white" : "bg-white hover:bg-gray-100"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
