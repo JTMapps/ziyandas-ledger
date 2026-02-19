@@ -31,23 +31,28 @@ export default function EntityGate() {
   });
 
   useEffect(() => {
-    if (userQuery.isLoading || entitiesQuery.isLoading) return;
+  if (userQuery.isLoading || entitiesQuery.isLoading) return;
 
-    if (!userQuery.data) {
-      navigate("/auth", { replace: true });
-      return;
-    }
+  if (!userQuery.data) {
+    navigate("/auth", { replace: true });
+    return;
+  }
 
-    const entities = entitiesQuery.data;
+  const entities = entitiesQuery.data;
 
-    if (!entities || entities.length === 0) {
-      navigate("/entities/new", { replace: true });
-      return;
-    }
+  if (!entities || entities.length === 0) {
+    navigate("/entities/new", { replace: true });
+    return;
+  }
 
-    // Default to the first entity (common enterprise pattern)
-    navigate(`/entities/${entities[0].id}/overview`, { replace: true });
-  }, [userQuery, entitiesQuery, navigate]);
+  navigate(`/entities/${entities[0].id}/overview`, { replace: true });
+}, [
+  userQuery.isLoading,
+  userQuery.data,
+  entitiesQuery.isLoading,
+  entitiesQuery.data,
+  navigate
+]);
 
   return (
     <div className="h-screen flex items-center justify-center">
