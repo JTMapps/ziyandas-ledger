@@ -1,25 +1,29 @@
 // src/pages/entity/EntityCreatePage.tsx
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 
 type EntityType = "Business" | "Personal";
 
+type CreateEntityInput = {
+  name: string;
+  type: EntityType;
+};
+
 export default function EntityCreatePage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState("");
   const [type, setType] = useState<EntityType>("Business");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleCreate() {
-    try {
-      setError(null);
+  const canSubmit = useMemo(() => name.trim().length > 0, [name]);
 
-      if (!name.trim()) throw new Error("Entity name is required.");
-
-      setCreating(true);
+  const createEntityMutation = useMutation({
+    mutationFn: async (input: CreateEntityInput) => {
+      const trimmed = input.name.trim();
+      if (!trimmed) throw new Error("Entity name is required.");
 
       const { data: auth, error: authErr } = await supabase.auth.getUser();
       if (authErr) throw authErr;
@@ -29,8 +33,8 @@ export default function EntityCreatePage() {
         .from("entities")
         .insert([
           {
-            name: name.trim(),
-            type,
+            name: trimmed,
+            type: input.type,
             created_by: auth.user.id,
           },
         ])
@@ -38,26 +42,38 @@ export default function EntityCreatePage() {
         .single();
 
       if (error) throw error;
+      if (!data?.id) throw new Error("Entity created but no id returned.");
 
-      const entityId = data.id as string;
+      return data.id as string;
+    },
+
+    onSuccess: async (entityId) => {
+      // ✅ keep EntitySwitcher + EntityGate + any list in sync
+      await queryClient.invalidateQueries({ queryKey: ["entities"] });
 
       // Next step: template selection
       navigate(`/entities/${entityId}/template`, { replace: true });
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setCreating(false);
-    }
+    },
+  });
+
+  function handleCreate() {
+    if (!canSubmit || createEntityMutation.isPending) return;
+    createEntityMutation.mutate({ name, type });
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-8 flex items-center justify-center">
       <div className="w-full max-w-xl bg-white border rounded shadow-sm p-6 space-y-6">
-        <h1 className="text-2xl font-bold">Create Entity</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Create Entity</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Next you’ll select a chart-of-accounts template and Ziyanda’s Ledger will configure the entity automatically.
+          </p>
+        </div>
 
-        {error && (
+        {createEntityMutation.error && (
           <div className="bg-red-100 border border-red-300 text-red-700 px-4 py-3 rounded">
-            {error}
+            {String((createEntityMutation.error as any)?.message ?? createEntityMutation.error)}
           </div>
         )}
 
@@ -68,6 +84,7 @@ export default function EntityCreatePage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Ziyanda Consulting (Pty) Ltd"
+            autoFocus
           />
         </div>
 
@@ -85,15 +102,12 @@ export default function EntityCreatePage() {
 
         <button
           onClick={handleCreate}
-          disabled={creating}
+          disabled={!canSubmit || createEntityMutation.isPending}
           className="w-full py-3 rounded text-white font-bold bg-black disabled:opacity-50"
+          type="button"
         >
-          {creating ? "Creating…" : "Create Entity"}
+          {createEntityMutation.isPending ? "Creating…" : "Create Entity"}
         </button>
-
-        <div className="text-xs text-gray-500">
-          Next you’ll select a chart-of-accounts template and Ziyanda’s Ledger will configure the entity automatically.
-        </div>
       </div>
     </div>
   );
