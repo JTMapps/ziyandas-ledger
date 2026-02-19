@@ -15,31 +15,86 @@ import HospitalityMealServiceWizard from "./HospitalityMealServiceWizard";
 import RealEstateRentIncomeWizard from "./RealEstateRentIncomeWizard";
 import RealEstateMaintenanceWizard from "./RealEstateMaintenanceWizard";
 
-export default function IndustryRouter() {
-  return (
-    <Routes>
-      {/* Retail */}
-      <Route path="retail/sale" element={<RetailSaleWizard />} />
-      <Route path="retail/purchase" element={<RetailPurchaseWizard />} />
+type Props = {
+  industryType: string | null; // "Retail" | "Manufacturing" | "Services" | "RealEstate" | "Hospitality" | "Generic" | null
+};
 
-      {/* Manufacturing */}
-      <Route path="manufacturing/consume" element={<ManufacturingConsumeRawMaterialsWizard />} />
-      <Route path="manufacturing/complete" element={<ManufacturingCompleteBatchWizard />} />
+export default function IndustryRouter({ industryType }: Props) {
+  // If someone somehow gets here without a real industry
+  if (!industryType || industryType === "Generic") {
+    return <Navigate to="../overview" replace />;
+  }
 
-      {/* Services */}
-      <Route path="services/invoice" element={<ServicesClientInvoiceWizard />} />
-      <Route path="services/contractor" element={<ServicesPayContractorWizard />} />
+  switch (industryType) {
+    case "Retail":
+      return (
+        <Routes>
+          {/* Index: correct default landing */}
+          <Route path="" element={<Navigate to="retail/sale" replace />} />
 
-      {/* Hospitality */}
-      <Route path="hospitality/room-sale" element={<HospitalityRoomSaleWizard />} />
-      <Route path="hospitality/meal-service" element={<HospitalityMealServiceWizard />} />
+          {/* Retail */}
+          <Route path="retail/sale" element={<RetailSaleWizard />} />
+          <Route path="retail/purchase" element={<RetailPurchaseWizard />} />
 
-      {/* Real Estate */}
-      <Route path="real-estate/rent-income" element={<RealEstateRentIncomeWizard />} />
-      <Route path="real-estate/maintenance" element={<RealEstateMaintenanceWizard />} />
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="retail/sale" replace />} />
+        </Routes>
+      );
 
-      {/* Default */}
-      <Route path="*" element={<Navigate to="retail/sale" replace />} />
-    </Routes>
-  );
+    case "Manufacturing":
+      return (
+        <Routes>
+          <Route path="" element={<Navigate to="manufacturing/consume" replace />} />
+
+          {/* Manufacturing */}
+          <Route path="manufacturing/consume" element={<ManufacturingConsumeRawMaterialsWizard />} />
+          <Route path="manufacturing/complete" element={<ManufacturingCompleteBatchWizard />} />
+
+          <Route path="*" element={<Navigate to="manufacturing/consume" replace />} />
+        </Routes>
+      );
+
+    case "Services":
+      return (
+        <Routes>
+          <Route path="" element={<Navigate to="services/invoice" replace />} />
+
+          {/* Services */}
+          <Route path="services/invoice" element={<ServicesClientInvoiceWizard />} />
+          <Route path="services/contractor" element={<ServicesPayContractorWizard />} />
+
+          <Route path="*" element={<Navigate to="services/invoice" replace />} />
+        </Routes>
+      );
+
+    case "Hospitality":
+      return (
+        <Routes>
+          <Route path="" element={<Navigate to="hospitality/room-sale" replace />} />
+
+          {/* Hospitality */}
+          <Route path="hospitality/room-sale" element={<HospitalityRoomSaleWizard />} />
+          <Route path="hospitality/meal-service" element={<HospitalityMealServiceWizard />} />
+
+          <Route path="*" element={<Navigate to="hospitality/room-sale" replace />} />
+        </Routes>
+      );
+
+    case "RealEstate":
+      return (
+        <Routes>
+          <Route path="" element={<Navigate to="real-estate/rent-income" replace />} />
+
+          {/* Real Estate */}
+          <Route path="real-estate/rent-income" element={<RealEstateRentIncomeWizard />} />
+          <Route path="real-estate/maintenance" element={<RealEstateMaintenanceWizard />} />
+
+          <Route path="*" element={<Navigate to="real-estate/rent-income" replace />} />
+        </Routes>
+      );
+
+    default:
+      // Unknown enum value (future-proof)
+      return <Navigate to="../overview" replace />;
+  }
 }

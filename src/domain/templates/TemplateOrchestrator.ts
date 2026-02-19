@@ -5,6 +5,8 @@
 // Fix Option A:
 // ✅ Keep orchestrator wrappers (entityId, amount, description?) so wizards
 // can call stable 2–3 arg functions.
+// ✅ Pick template group by (template_name + entity_type + is_active)
+// ✅ Call apply_template_to_entity(entityId, templateGroupId) (2 args)
 // ❌ Do NOT expose raw IndustryCaptureRules.* directly (they are (accounts, params))
 // ---------------------------------------------------------------------------
 
@@ -47,11 +49,6 @@ export type TemplateKind =
   | "REAL_ESTATE"
   | "HOSPITALITY";
 
-export interface ApplyTemplateResult {
-  template_group_id: string;
-  accounts_created: number;
-}
-
 type EntityRowForDerive = {
   type: "Business" | "Personal";
   industry_type?: string | null;
@@ -88,11 +85,7 @@ export function deriveTemplateKindFromEntity(entity: EntityRowForDerive): Templa
 
   const key = entity.industry_type ?? "Generic";
   return industryMap[key] ?? "BUSINESS";
-
-    
-  
 }
-
 
 // ---------------------------------------------------------------------------
 // STEP 1 — ASSIGN TEMPLATE GROUP TO ENTITY (industry-aware)
@@ -105,8 +98,7 @@ export async function assignTemplateToEntity(
 ): Promise<string> {
   const templateName = TEMPLATE_NAME_BY_KIND[kind];
 
-  // account_template_groups.entity_type is an enum in DB; you currently model it
-  // as either "Business" or "Personal". Industry templates are still business entities.
+  // Industry templates are still business entities in DB
   const entityTypeForGroup = kind === "PERSONAL" ? "Personal" : "Business";
 
   const { data: group, error: groupErr } = await supabase
@@ -147,10 +139,6 @@ export async function applyTemplateToEntity(
   entityId: string,
   templateGroupId: string
 ): Promise<void> {
-  if (!templateGroupId) {
-    throw new Error("applyTemplateToEntity: templateGroupId is missing/empty.");
-  }
-
   const { error } = await supabase.rpc("apply_template_to_entity", {
     p_entity_id: entityId,
     p_template_group_id: templateGroupId,
@@ -244,7 +232,6 @@ async function postJournalFromRule(entityId: string, journal: any) {
 // ✅ Stable wizard API: (entityId, amount, description?)
 // ---------------------------------------------------------------------------
 export const TemplateJournalEngine = {
-  // ---------------- BUSINESS ----------------
   business: {
     revenue: async (entityId: string, amount: number, description?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
@@ -259,7 +246,6 @@ export const TemplateJournalEngine = {
     },
   },
 
-  // ---------------- PERSONAL ----------------
   personal: {
     salary: async (entityId: string, amount: number, source?: string) => {
       const accounts = await loadAppliedAccounts(entityId);
@@ -280,7 +266,6 @@ export const TemplateJournalEngine = {
     },
   },
 
-  // ---------------- INDUSTRY-SPECIFIC (WRAPPERS) ----------------
   industry: {
     retail: {
       sale: async (entityId: string, amount: number, description?: string) => {
@@ -291,7 +276,10 @@ export const TemplateJournalEngine = {
 
       purchaseInventory: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.retail.purchaseInventory(accounts, { amount, description });
+        const journal = IndustryCaptureRules.retail.purchaseInventory(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
     },
@@ -299,13 +287,19 @@ export const TemplateJournalEngine = {
     manufacturing: {
       consumeRawMaterials: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.manufacturing.consumeRawMaterials(accounts, { amount, description });
+        const journal = IndustryCaptureRules.manufacturing.consumeRawMaterials(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
 
       completeProductionBatch: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.manufacturing.completeProductionBatch(accounts, { amount, description });
+        const journal = IndustryCaptureRules.manufacturing.completeProductionBatch(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
     },
@@ -313,13 +307,19 @@ export const TemplateJournalEngine = {
     services: {
       clientInvoice: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.services.clientInvoice(accounts, { amount, description });
+        const journal = IndustryCaptureRules.services.clientInvoice(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
 
       payContractor: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.services.payContractor(accounts, { amount, description });
+        const journal = IndustryCaptureRules.services.payContractor(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
     },
@@ -331,10 +331,12 @@ export const TemplateJournalEngine = {
         return postJournalFromRule(entityId, journal);
       },
 
-      // ✅ This fixes your wizard "expected 2 args but got 3"
       serviceMeal: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.hospitality.serviceMeal(accounts, { amount, description });
+        const journal = IndustryCaptureRules.hospitality.serviceMeal(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
     },
@@ -348,7 +350,10 @@ export const TemplateJournalEngine = {
 
       maintenanceExpense: async (entityId: string, amount: number, description?: string) => {
         const accounts = await loadAppliedAccounts(entityId);
-        const journal = IndustryCaptureRules.realEstate.maintenanceExpense(accounts, { amount, description });
+        const journal = IndustryCaptureRules.realEstate.maintenanceExpense(accounts, {
+          amount,
+          description,
+        });
         return postJournalFromRule(entityId, journal);
       },
     },
@@ -372,22 +377,16 @@ export function getTemplateDefinition(kind: TemplateKind): TemplateAccount[] {
   return TEMPLATE_REGISTRY[kind];
 }
 
+// ---------------------------------------------------------------------------
 // STEP 7 — HIGH LEVEL SETUP FLOW (selected kind)
+// ✅ assign returns templateGroupId, then apply uses same id
 // ---------------------------------------------------------------------------
 export async function setupEntityTemplate(entityId: string, kind: TemplateKind) {
   const templateGroupId = await assignTemplateToEntity(entityId, kind);
-
-  if (!templateGroupId) {
-    throw new Error(
-      `setupEntityTemplate: assignTemplateToEntity returned empty templateGroupId for kind=${kind}`
-    );
-  }
-
   await applyTemplateToEntity(entityId, templateGroupId);
 
   return {
     kind,
     template_group_id: templateGroupId,
-    accounts_created: null,
   };
 }
