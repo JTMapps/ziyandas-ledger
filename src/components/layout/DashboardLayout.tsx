@@ -21,12 +21,12 @@ interface DashboardLayoutProps {
   entity: DashboardEntity;
 }
 
-// DB enum -> display label
+// DB enum -> display label (✅ includes Generic)
 function formatIndustry(industryType?: string | null): string | null {
   if (!industryType) return null;
-  if (industryType === "Generic") return null;
 
   const map: Record<string, string> = {
+    Generic: "Generic",
     Retail: "Retail",
     Manufacturing: "Manufacturing",
     Services: "Services",
@@ -37,77 +37,106 @@ function formatIndustry(industryType?: string | null): string | null {
   return map[industryType] ?? industryType;
 }
 
-export default function DashboardLayout({ children, tabs, entity }: DashboardLayoutProps) {
+function buildSidebarTitle(entity: DashboardEntity, effectiveEntityId: string) {
+  const name =
+    entity?.name?.trim() ||
+    (effectiveEntityId ? `Entity #${effectiveEntityId}` : "Entity");
+
+  const type = entity?.type ?? null;
+
+  // ✅ Always show industry for Business, including Generic
+  const industryLabel =
+    type === "Business"
+      ? formatIndustry(entity?.industry_type ?? "Generic")
+      : null;
+
+  if (!type) return name;
+
+  // e.g. "Oromachi (Business • Generic)" or "Oromachi (Personal)"
+  return `${name} (${type}${industryLabel ? ` • ${industryLabel}` : ""})`;
+}
+
+export default function DashboardLayout({
+  children,
+  tabs,
+  entity,
+}: DashboardLayoutProps) {
   const { entityId } = useParams<{ entityId: string }>();
 
   // Fallback if someone navigates here without the route param
   const effectiveEntityId = entityId ?? entity.id;
 
-  const name = entity?.name
-    ? entity.name
-    : effectiveEntityId
-      ? `Entity #${effectiveEntityId}`
-      : "";
-
-  const type = entity?.type ? entity.type : null;
-
-  const industryLabel =
-    type === "Business" ? formatIndustry(entity?.industry_type ?? null) : null;
-
-  const sidebarTitle =
-    name +
-    (type
-      ? ` (${type}${industryLabel ? ` • ${industryLabel}` : ""})`
-      : "");
+  const sidebarTitle = buildSidebarTitle(entity, effectiveEntityId);
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* SIDEBAR */}
-      <aside className="w-64 bg-white border-r flex flex-col">
-        {/* ✅ Big header FIRST */}
-        <div className="p-4 border-b">
-          <div className="text-xl font-bold text-gray-900 leading-snug">
-            {sidebarTitle}
+    <div className="h-screen bg-gray-100 flex flex-col">
+      {/* ✅ APP HEADER (persistent) */}
+      <header className="h-14 bg-white border-b flex items-center justify-between px-6">
+        <div className="text-base font-semibold text-gray-900">
+          Ziyanda&apos;s Ledger
+        </div>
+
+        {/* Optional: room for global actions later */}
+        <div className="text-xs text-gray-500">
+          {/* Financial ledger workspace */}
+        </div>
+      </header>
+
+      {/* BODY */}
+      <div className="flex flex-1 min-h-0">
+        {/* SIDEBAR */}
+        <aside className="w-64 bg-white border-r flex flex-col min-h-0">
+          {/* Entity title */}
+          <div className="p-4 border-b">
+            <div className="text-lg font-semibold text-gray-900 leading-snug">
+              {sidebarTitle}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              Switch entity or navigate
+            </div>
           </div>
-        </div>
 
-        {/* ✅ Entity switcher SECOND */}
-        <div className="p-4 border-b">
-          <EntitySwitcher />
-        </div>
+          {/* Entity switcher */}
+          <div className="p-4 border-b">
+            <EntitySwitcher />
+          </div>
 
-        {/* ✅ Tabs THIRD */}
-        <nav className="flex-1 p-4 space-y-1">
-          {tabs.map((item) => (
+          {/* Tabs */}
+          <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+            {tabs.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `block px-3 py-2 rounded text-sm transition ${
+                    isActive
+                      ? "bg-black text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`
+                }
+                end
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        </aside>
+
+        {/* MAIN AREA */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Page header (kept minimal) */}
+          <div className="h-14 bg-white border-b flex items-center justify-end px-6">
             <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded text-sm ${
-                  isActive
-                    ? "bg-black text-white"
-                    : "text-gray-700 hover:bg-gray-200"
-                }`
-              }
-              end
+              to="/profile"
+              className="text-sm text-gray-600 hover:text-black"
             >
-              {item.label}
+              Profile
             </NavLink>
-          ))}
-        </nav>
-      </aside>
+          </div>
 
-      {/* MAIN AREA */}
-      <div className="flex-1 flex flex-col">
-        {/* HEADER (main area) */}
-        <header className="h-14 bg-white border-b flex items-center justify-end px-6">
-          <NavLink to="/profile" className="text-sm text-gray-600 hover:text-black">
-            Profile
-          </NavLink>
-        </header>
-
-        {/* CONTENT */}
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+          {/* CONTENT */}
+          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        </div>
       </div>
     </div>
   );
