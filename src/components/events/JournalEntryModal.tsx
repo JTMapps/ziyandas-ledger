@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
-import { EventOrchestrator } from "../../orchestrators/EventOrchestrator";
+import { qk } from "../../hooks/queryKeys";
 import AccountPicker from "../pickers/AccountPicker";
 
 interface Props {
@@ -17,53 +17,27 @@ interface LineItem {
 }
 
 export default function JournalEntryModal({ entityId, onClose }: Props) {
-  const [eventDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const qc = useQueryClient();
 
+  const [eventDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [description, setDescription] = useState("");
   const [lines, setLines] = useState<LineItem[]>([
     { account_id: "", amount: 0, effect_sign: 1 },
-    { account_id: "", amount: 0, effect_sign: -1 }
+    { account_id: "", amount: 0, effect_sign: -1 },
   ]);
-
-  const [error, setError] = useState<string | null>(null);
-  const [posting, setPosting] = useState(false);
-
-  // -------------------------------------------------------
-  // Load accounts for account picker
-  // -------------------------------------------------------
-  const accountsQuery = useQuery({
-    queryKey: ["accounts", entityId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("accounts")
-        .select("id, account_code, account_name, account_type")
-        .eq("entity_id", entityId)
-        .order("account_code");
-
-      if (error) throw error;
-      return data;
-    }
-  });
 
   // -------------------------------------------------------
   // Add new line item
   // -------------------------------------------------------
   function addLine() {
-    setLines([
-      ...lines,
-      { account_id: "", amount: 0, effect_sign: 1 }
-    ]);
+    setLines((prev) => [...prev, { account_id: "", amount: 0, effect_sign: 1 }]);
   }
 
   // -------------------------------------------------------
   // Remove line item
   // -------------------------------------------------------
   function removeLine(i: number) {
-    const updated = [...lines];
-    updated.splice(i, 1);
-    setLines(updated);
+    setLines((prev) => prev.filter((_, idx) => idx !== i));
   }
 
   // -------------------------------------------------------
@@ -77,33 +51,54 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
     .filter((l) => l.effect_sign === -1)
     .reduce((sum, l) => sum + (l.amount || 0), 0);
 
-  const isBalanced = debitTotal === creditTotal;
+  // Better than === for floating point / cents edge cases
+  const isBalanced = Math.abs(debitTotal - creditTotal) < 0.0001;
 
-  async function postJournal() {
-    try {
-      setError(null);
-
+  // -------------------------------------------------------
+  // Mutation: Post journal using DB RPC + invalidate queries
+  // -------------------------------------------------------
+  const postJournalMutation = useMutation({
+    mutationFn: async () => {
       if (!isBalanced) throw new Error("Journal must balance.");
-      if (lines.some((l) => !l.account_id || l.amount <= 0))
+      if (lines.some((l) => !l.account_id || l.amount <= 0)) {
         throw new Error("Each line needs an account and amount.");
+      }
+      if (lines.length < 2) {
+        throw new Error("At least 2 lines (debit + credit) are required.");
+      }
 
-      setPosting(true);
+      const effects = lines.map((l) => ({
+        account_id: l.account_id,
+        amount: l.amount,
+        effect_sign: l.effect_sign,
+        // tax_treatment: null,
+        // deductible: false,
+      }));
 
-      await EventOrchestrator.recordEconomicEvent({
-        entityId,
-        eventType: "GENERAL_JOURNAL",
-        eventDate,
-        description,
-        effects: lines
+      // NOTE: matches your DB signature:
+      // record_economic_event(p_entity_id, p_event_type, p_event_date, p_description, p_effects)
+      const { data, error } = await supabase.rpc("record_economic_event", {
+        p_entity_id: entityId,
+        p_event_type: null, // or set to a valid enum value from economic_event_type
+        p_event_date: eventDate,
+        p_description: description || null,
+        p_effects: effects,
       });
 
+      if (error) throw error;
+      return data as string; // event_id
+    },
+
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.economicEvents(entityId) }),
+        qc.invalidateQueries({ queryKey: qk.entitySnapshot(entityId) }),
+        qc.invalidateQueries({ queryKey: qk.taxSummary(entityId) }),
+        qc.invalidateQueries({ queryKey: qk.periods(entityId) }),
+      ]);
       onClose();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setPosting(false);
-    }
-  }
+    },
+  });
 
   // -------------------------------------------------------
   // Render
@@ -138,10 +133,13 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
                 entityId={entityId}
                 value={line.account_id}
                 onChange={(val) => {
-                  const updated = [...lines];
-                  updated[i].account_id = val;
-                  setLines(updated);
+                  setLines((prev) => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], account_id: val };
+                    return updated;
+                  });
                 }}
+                disabled={postJournalMutation.isPending}
               />
 
               {/* Amount */}
@@ -149,10 +147,14 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
                 type="number"
                 className="border p-2 rounded col-span-2"
                 value={line.amount}
+                disabled={postJournalMutation.isPending}
                 onChange={(e) => {
-                  const updated = [...lines];
-                  updated[i].amount = Number(e.target.value);
-                  setLines(updated);
+                  const next = Number(e.target.value);
+                  setLines((prev) => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], amount: next };
+                    return updated;
+                  });
                 }}
               />
 
@@ -160,10 +162,14 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
               <select
                 className="border p-2 rounded"
                 value={line.effect_sign}
+                disabled={postJournalMutation.isPending}
                 onChange={(e) => {
-                  const updated = [...lines];
-                  updated[i].effect_sign = Number(e.target.value) as 1 | -1;
-                  setLines(updated);
+                  const sign = Number(e.target.value) as 1 | -1;
+                  setLines((prev) => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], effect_sign: sign };
+                    return updated;
+                  });
                 }}
               >
                 <option value={1}>Debit</option>
@@ -174,6 +180,7 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
               {lines.length > 2 && (
                 <button
                   className="text-red-600 text-sm"
+                  disabled={postJournalMutation.isPending}
                   onClick={() => removeLine(i)}
                 >
                   Remove
@@ -184,7 +191,8 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
 
           <button
             onClick={addLine}
-            className="text-sm underline mt-2 text-blue-600"
+            disabled={postJournalMutation.isPending}
+            className="text-sm underline mt-2 text-blue-600 disabled:opacity-50"
           >
             + Add Line
           </button>
@@ -194,25 +202,30 @@ export default function JournalEntryModal({ entityId, onClose }: Props) {
         <div className="bg-gray-50 p-3 rounded text-sm">
           <div>Debits: {debitTotal}</div>
           <div>Credits: {creditTotal}</div>
-          <div
-            className={isBalanced ? "text-green-600" : "text-red-600"}
-          >
+          <div className={isBalanced ? "text-green-600" : "text-red-600"}>
             {isBalanced ? "Balanced ✔" : "Not Balanced ✘"}
           </div>
         </div>
 
-        {error && <div className="text-red-600">{error}</div>}
+        {/* ERROR FROM MUTATION */}
+        {postJournalMutation.error && (
+          <div className="text-red-600">
+            {String((postJournalMutation.error as any)?.message ?? postJournalMutation.error)}
+          </div>
+        )}
 
         {/* SUBMIT */}
         <div className="flex justify-between">
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose} disabled={postJournalMutation.isPending}>
+            Cancel
+          </button>
 
           <button
-            disabled={posting}
-            onClick={postJournal}
-            className="bg-black text-white px-4 py-2 rounded"
+            disabled={postJournalMutation.isPending}
+            onClick={() => postJournalMutation.mutate()}
+            className="bg-black text-white px-4 py-2 rounded disabled:opacity-50"
           >
-            {posting ? "Posting…" : "Post Journal Entry"}
+            {postJournalMutation.isPending ? "Posting…" : "Post Journal Entry"}
           </button>
         </div>
       </div>

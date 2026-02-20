@@ -18,15 +18,15 @@ export default function YearEndPage() {
   const { runFullYearEndClose } = useYearEnd();
 
   async function handleRun() {
-    setLog((l) => [...l, `Running year-end for ${year}…`]);
+  setLog((l) => [...l, `Running year-end for ${year}…`]);
 
-    try {
-      const result = await runFullYearEndClose(id, year);
-      setLog((l) => [...l, `✔ Year-end complete: ${JSON.stringify(result)}`]);
-    } catch (e: any) {
-      setLog((l) => [...l, `✖ Year-end failed: ${String(e?.message ?? e)}`]);
-    }
+  try {
+    const result = await runFullYearEndClose.mutateAsync({ entityId: id, year });
+    setLog((l) => [...l, `✔ Year-end complete: ${JSON.stringify(result)}`]);
+  } catch (e: any) {
+    setLog((l) => [...l, `✖ Year-end failed: ${String(e?.message ?? e)}`]);
   }
+}
 
   return (
     <div className="space-y-6">
@@ -39,12 +39,13 @@ export default function YearEndPage() {
           onChange={(e) => setYear(Number(e.target.value))}
           className="border p-2 w-32"
         />
-        <button
-          className="px-4 py-2 bg-black text-white rounded"
-          onClick={handleRun}
-        >
-          Run Year-End Close
-        </button>
+          <button
+            className="px-4 py-2 bg-black text-white rounded disabled:opacity-50"
+            onClick={handleRun}
+            disabled={runFullYearEndClose.isPending}
+          >
+            {runFullYearEndClose.isPending ? "Running…" : "Run Year-End Close"}
+          </button>
       </div>
 
       <div className="bg-gray-100 rounded p-4 text-sm whitespace-pre-line">

@@ -1,34 +1,49 @@
-// src/hooks/useEconomicEvents.ts
-import { useState } from "react";
-import { EventOrchestrator } from "../orchestrators/EventOrchestrator";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "../lib/supabase";
+import { qk } from "./queryKeys";
+
+type RecordEconomicEventParams = {
+  entityId: string;
+  eventType: string;   // economic_event_type enum value
+  eventDate: string;   // ISO yyyy-mm-dd
+  description?: string;
+  effects: Array<{
+    account_id: string;
+    amount: number;
+    effect_sign: number; // 1 or -1
+    tax_treatment?: string | null;
+    deductible?: boolean;
+  }>;
+};
 
 export function useEconomicEvents() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
-  async function recordEconomicEvent(params: {
-    entityId: string;
-    eventType: string;
-    eventDate: string;
-    description?: string;
-    effects: any[];
-  }): Promise<string> {
-    setLoading(true);
-    setError(null);
+  const recordEconomicEvent = useMutation({
+    mutationFn: async (params: RecordEconomicEventParams): Promise<string> => {
+      const { data, error } = await supabase.rpc("record_economic_event", {
+        p_entity_id: params.entityId,
+        p_event_type: params.eventType,
+        p_event_date: params.eventDate,
+        p_description: params.description ?? "",
+        p_effects: params.effects, // jsonb array
+      });
 
-    try {
-      return await EventOrchestrator.recordEconomicEvent(params);
-    } catch (err: any) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }
+      if (error) throw error;
+      return data as string; // event_id
+    },
 
-  return {
-    recordEconomicEvent,
-    loading,
-    error
-  };
+    onSuccess: async (_eventId, vars) => {
+      // Anything derived from effects should refresh
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.entitySnapshot(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.taxSummary(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.periods(vars.entityId) }),
+        // statements are keyed by (entityId, periodId, type) so we can't target a single one safely.
+        // If you want a clean sweep, add a higher-level key later like ["statements", entityId].
+      ]);
+    },
+  });
+
+  return { recordEconomicEvent };
 }

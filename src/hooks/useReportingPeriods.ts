@@ -1,53 +1,81 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
+import { qk } from "./queryKeys";
 
-export function useReportingPeriods(entityId: string) {
-  // ------------------------------------------------------------
-  // LOAD PERIODS
-  // ------------------------------------------------------------
-  const { data: periods = [], isLoading, refetch } = useQuery({
-    queryKey: ["periods", entityId],
+export type ReportingPeriod = {
+  id: string;
+  entity_id: string;
+  period_start: string;
+  period_end: string;
+  is_closed: boolean;
+};
+
+export function useReportingPeriods(entityId?: string) {
+  const qc = useQueryClient();
+  const enabled = !!entityId;
+
+  const periodsQuery = useQuery<ReportingPeriod[]>({
+    queryKey: enabled ? qk.periods(entityId!) : ["periods", "disabled"],
+    enabled,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reporting_periods")
-        .select("*")
-        .eq("entity_id", entityId)
+        .select("id, entity_id, period_start, period_end, is_closed")
+        .eq("entity_id", entityId!)
         .order("period_start", { ascending: false });
 
       if (error) throw error;
-      return data;
-    }
+      return (data ?? []) as ReportingPeriod[];
+    },
   });
 
-  // ------------------------------------------------------------
-  // CREATE NEXT REPORTING PERIOD
-  // Calls RPC: create_next_reporting_period(entity_id)
-  // ------------------------------------------------------------
   const createNextPeriod = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.rpc(
-        "create_next_reporting_period",
-        { p_entity_id: entityId }
-      );
+      if (!entityId) throw new Error("Missing entityId");
+      const { data, error } = await supabase.rpc("create_next_reporting_period", {
+        p_entity_id: entityId,
+      });
       if (error) throw error;
       return data;
     },
-    onSuccess: () => refetch()
+    onSuccess: async () => {
+      if (!entityId) return;
+      await qc.invalidateQueries({ queryKey: qk.periods(entityId) });
+    },
   });
 
-  // ------------------------------------------------------------
-  // IF NO PERIODS → create the first one automatically
-  // ------------------------------------------------------------
+  const ensureCurrentPeriod = useMutation({
+    mutationFn: async () => {
+      if (!entityId) throw new Error("Missing entityId");
+      const { data, error } = await supabase.rpc("get_or_create_current_period", {
+        p_entity_id: entityId,
+      });
+      if (error) throw error;
+      return data as string; // period_id
+    },
+    onSuccess: async () => {
+      if (!entityId) return;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.periods(entityId) }),
+        qc.invalidateQueries({ queryKey: qk.currentPeriod(entityId) }),
+      ]);
+    },
+  });
+
   async function createIfMissing() {
+    const periods = periodsQuery.data ?? [];
     if (periods.length === 0) {
       await createNextPeriod.mutateAsync();
+      return true;
     }
+    return false;
   }
 
   return {
-    periods,
-    isLoading,
+    periodsQuery,
+    periods: periodsQuery.data ?? [],
     createNextPeriod,
-    createIfMissing,   // <-- This fixes your error
+    createIfMissing,
+    ensureCurrentPeriod,
   };
 }

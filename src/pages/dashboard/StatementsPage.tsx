@@ -12,9 +12,7 @@ type StatementType = "SOFP" | "P&L" | "OCI" | "CF";
 export default function StatementsPage() {
   const { entityId } = useParams<{ entityId: string }>();
 
-  if (!entityId) {
-    return <div className="p-4">Missing entityId in route.</div>;
-  }
+  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
   const { periods, createIfMissing } = useReportingPeriods(entityId);
 
@@ -58,17 +56,17 @@ export default function StatementsPage() {
 
       <div>
         <select
-          className="border p-2"
-          value={periodId ?? ""}
-          onChange={(e) => setPeriodId(e.target.value || null)}
-        >
-          <option value="">Select period…</option>
-          {periods.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.period_start} → {p.period_end}
-            </option>
-          ))}
-        </select>
+        className="border p-2"
+        value={periodId ?? ""}
+        onChange={(e) => setPeriodId(e.target.value || null)}
+      >
+        <option value="">Select period…</option>
+        {periods.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.period_start} → {p.period_end}
+          </option>
+        ))}
+      </select>
 
         <button
           onClick={() => createIfMissing()}

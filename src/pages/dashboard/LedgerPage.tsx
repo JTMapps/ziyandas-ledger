@@ -1,10 +1,11 @@
+// src/pages/dashboard/LedgerPage.tsx
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import { supabase } from "../../lib/supabase";
 import JournalEntryModal from "../../components/events/JournalEntryModal";
-import { useEconomicEvents } from "../../hooks/useEconomicEvents";
+import { qk } from "../../hooks/queryKeys";
 
 type LedgerEventRow = {
   id: string;
@@ -16,29 +17,17 @@ type LedgerEventRow = {
 
 export default function LedgerPage() {
   const { entityId } = useParams<{ entityId: string }>();
-
-  if (!entityId) {
-    return <div className="p-4">Missing entityId in route.</div>;
-  }
-
-  const { recordEconomicEvent, loading, error } = useEconomicEvents();
   const [showModal, setShowModal] = useState(false);
 
-  const { data: events, refetch, isLoading } = useQuery<LedgerEventRow[]>({
-    queryKey: ["economic-events", entityId],
+  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
+
+  const eventsQuery = useQuery<LedgerEventRow[]>({
+    queryKey: qk.economicEvents(entityId),
     enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("economic_events")
-        .select(
-          `
-          id,
-          event_date,
-          description,
-          event_type,
-          created_at
-        `
-        )
+        .select("id, event_date, description, event_type, created_at")
         .eq("entity_id", entityId)
         .order("event_date", { ascending: false });
 
@@ -46,6 +35,8 @@ export default function LedgerPage() {
       return (data ?? []) as LedgerEventRow[];
     },
   });
+
+  const events = eventsQuery.data ?? [];
 
   return (
     <div className="space-y-8">
@@ -65,9 +56,15 @@ export default function LedgerPage() {
           entityId={entityId}
           onClose={() => {
             setShowModal(false);
-            refetch();
           }}
         />
+      )}
+
+      {eventsQuery.error && (
+        <div className="text-red-600 text-sm">
+          Failed to load events:{" "}
+          {String((eventsQuery.error as any)?.message ?? eventsQuery.error)}
+        </div>
       )}
 
       <div className="bg-white border rounded shadow-sm overflow-hidden">
@@ -82,7 +79,7 @@ export default function LedgerPage() {
           </thead>
 
           <tbody>
-            {isLoading && (
+            {eventsQuery.isLoading && (
               <tr>
                 <td className="p-4 text-center" colSpan={4}>
                   Loading…
@@ -90,7 +87,7 @@ export default function LedgerPage() {
               </tr>
             )}
 
-            {events?.map((ev) => (
+            {events.map((ev) => (
               <tr key={ev.id} className="border-b hover:bg-gray-50">
                 <td className="p-2 border-r">{ev.event_date}</td>
                 <td className="p-2 border-r">{ev.description}</td>
@@ -99,7 +96,7 @@ export default function LedgerPage() {
               </tr>
             ))}
 
-            {!isLoading && (events?.length ?? 0) === 0 && (
+            {!eventsQuery.isLoading && events.length === 0 && (
               <tr>
                 <td colSpan={4} className="text-center p-4 text-gray-500">
                   No events recorded yet.
@@ -109,8 +106,6 @@ export default function LedgerPage() {
           </tbody>
         </table>
       </div>
-
-      {error && <div className="text-red-600">{error}</div>}
     </div>
   );
 }

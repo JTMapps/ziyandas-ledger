@@ -72,17 +72,15 @@ export const EventOrchestrator = {
     if (!entityId) throw new Error('entityId is required')
     if (!effects || effects.length < 2)
       throw new Error('At least 2 effects (debit+credit) are required')
-
-    const user = await requireAuth()
-
-    const eventId = await rpc<string>('record_economic_event', {
-      p_user_id: user.id,
+    
+    // (RPC will be protected by RLS / auth checks in the DB)
+    const eventId = await rpc<string>("record_economic_event", {
       p_entity_id: entityId,
       p_event_type: eventType,
       p_event_date: eventDate,
       p_description: description ?? null,
-      p_effects: effects
-    })
+      p_effects: effects,
+    });
 
     // Notify UI
     eventEmitter.emit('ECONOMIC_EVENT_RECORDED', { eventId })

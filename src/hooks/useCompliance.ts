@@ -1,76 +1,92 @@
-import { useState, useCallback } from 'react'
-import { ComplianceOrchestrator } from '../orchestrators/ComplianceOrchestrator'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "../lib/supabase";
+import { ComplianceOrchestrator } from "../orchestrators/ComplianceOrchestrator";
+import { qk } from "./queryKeys";
 
 export function useCompliance() {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [vatReport, setVatReport] = useState<any | null>(null)
-  const [auditLog, setAuditLog] = useState<any[]>([])
+  const qc = useQueryClient();
 
-  const postDeferredTax = useCallback(async (entityId: string, year: number) => {
-    setLoading(true)
-    setError(null)
-    try {
-      return await ComplianceOrchestrator.postDeferredTax(entityId, year)
-    } catch (err: any) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // -----------------------
+  // VAT Report (DB RPC)
+  // -----------------------
+  function useVATReport(entityId?: string, start?: string, end?: string) {
+    const enabled = !!entityId && !!start && !!end;
 
-  const postECL = useCallback(async (entityId: string, year: number) => {
-    setLoading(true)
-    setError(null)
-    try {
-      return await ComplianceOrchestrator.postECL(entityId, year)
-    } catch (err: any) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    return useQuery({
+      queryKey: enabled ? qk.vatReport(entityId!, start!, end!) : ["vat-report", "disabled"],
+      enabled,
+      queryFn: async () => {
+        // Prefer your DB function directly:
+        const { data, error } = await supabase.rpc("generate_vat_report", {
+          p_entity_id: entityId!,
+          p_start: start!,
+          p_end: end!,
+        });
+        if (error) throw error;
+        return data as any; // { vat_output, vat_input, vat_payable }
+      },
+    });
+  }
 
-  const generateVATReport = useCallback(async (entityId: string, start: string, end: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const report = await ComplianceOrchestrator.generateVATReport(entityId, start, end)
-      setVatReport(report)
-      return report
-    } catch (err: any) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // -----------------------
+  // Audit Log (table read)
+  // -----------------------
+  function useAuditLog(limit = 200) {
+    return useQuery({
+      queryKey: qk.auditLog(limit),
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from("audit_log")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(limit);
 
-  const loadAuditLog = useCallback(async (limit = 200) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const rows = await ComplianceOrchestrator.fetchAuditLog(limit)
-      setAuditLog(rows)
-      return rows
-    } catch (err: any) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+        if (error) throw error;
+        return data ?? [];
+      },
+    });
+  }
+
+  // -----------------------
+  // Deferred Tax Posting
+  // (keep orchestrator if it wraps more logic)
+  // -----------------------
+  const postDeferredTax = useMutation({
+    mutationFn: async (vars: { entityId: string; year: number }) => {
+      // If your orchestrator calls post_deferred_tax_movement() internally, keep it.
+      // Otherwise you can call RPC directly with supabase.rpc("post_deferred_tax_movement", ...)
+      return ComplianceOrchestrator.postDeferredTax(vars.entityId, vars.year);
+    },
+    onSuccess: async (_res, vars) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.entitySnapshot(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.taxSummary(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.periods(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.auditLog(200) }),
+      ]);
+    },
+  });
+
+  // -----------------------
+  // ECL Posting
+  // -----------------------
+  const postECL = useMutation({
+    mutationFn: async (vars: { entityId: string; year: number }) => {
+      return ComplianceOrchestrator.postECL(vars.entityId, vars.year);
+    },
+    onSuccess: async (_res, vars) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.entitySnapshot(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.periods(vars.entityId) }),
+        qc.invalidateQueries({ queryKey: qk.auditLog(200) }),
+      ]);
+    },
+  });
 
   return {
-    postDeferredTax,
-    postECL,
-    generateVATReport,
-    loadAuditLog,
-    vatReport,
-    auditLog,
-    loading,
-    error
-  }
+    useVATReport,
+    useAuditLog,
+    postDeferredTax, // postDeferredTax.mutate/mutateAsync
+    postECL,         // postECL.mutate/mutateAsync
+  };
 }
