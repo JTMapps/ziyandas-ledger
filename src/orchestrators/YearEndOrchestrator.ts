@@ -1,132 +1,80 @@
-// -----------------------------------------------------------
-// YearEndOrchestrator.ts
-// Enterprise Orchestrator for Year-End Close (D-Suite)
-// -----------------------------------------------------------
-
-import { supabase } from '../lib/supabase'
-import { eventEmitter } from '../lib/eventEmitter'
-
-// Shared RPC wrapper
-async function rpc<T>(fn: string, params: any): Promise<T> {
-  const { data, error } = await supabase.rpc(fn, params)
-
-  if (error) {
-    console.error(`[RPC ERROR] ${fn}`, error)
-    throw new Error(error.message)
-  }
-
-  return data as T
-}
-
-// Ensure auth
-async function requireAuth() {
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    throw new Error('User not authenticated')
-  }
-
-  return user
-}
-
-// -----------------------------------------------------------
-// Main Export
-// -----------------------------------------------------------
+// src/orchestrators/YearEndOrchestrator.ts
+import { eventEmitter } from "../lib/eventEmitter";
+import { rpc } from "../lib/rpc";
+import { requireAuth } from "../lib/auth";
 
 export const YearEndOrchestrator = {
-  /** -------------------------------------------------------
-   * 1) Run full enterprise year-end close pipeline
-   *    (MODULE 12 ORCHESTRATOR)
-   * ------------------------------------------------------ */
+  /** Full enterprise year-end close pipeline */
   async runFullYearEndClose(entityId: string, year: number) {
-    const user = await requireAuth()
+    const user = await requireAuth();
 
-    const closeResult = await rpc('close_financial_year_enterprise', {
+    // DB: close_financial_year_enterprise(p_entity_id uuid, p_year integer, p_user uuid)
+    const snapshotId = await rpc<string>("close_financial_year_enterprise", {
       p_entity_id: entityId,
       p_year: year,
-      p_user: user.id
-    })
+      p_user: user.id,
+    });
 
-    // Notify listeners
-    eventEmitter.emit('YEAR_END_COMPLETED', {
-      entityId,
-      year,
-      result: closeResult
-    })
-
-    return closeResult
+    eventEmitter.emit("YEAR_END_COMPLETED", { entityId, year, snapshotId });
+    return snapshotId;
   },
 
-  /** -------------------------------------------------------
-   * 2) Only run opening balance generator
-   *    (MODULE 2)
-   * ------------------------------------------------------ */
+  /** Opening balances generator */
   async generateOpeningBalances(entityId: string, year: number) {
-    const result = await rpc<void>('generate_opening_balances', {
-      p_entity_id: entityId,
-      p_year: year
-    })
+    await requireAuth();
 
-    eventEmitter.emit('OPENING_BALANCES_CREATED', { entityId, year })
-    return result
+    await rpc<void>("generate_opening_balances", {
+      p_entity_id: entityId,
+      p_year: year,
+    });
+
+    eventEmitter.emit("OPENING_BALANCES_CREATED", { entityId, year });
   },
 
-  /** -------------------------------------------------------
-   * 3) Run IFRS cash flow generation
-   *    (MODULE 3)
-   * ------------------------------------------------------ */
+  /** IFRS cash flow generation */
   async generateCashFlow(entityId: string, periodId: string) {
-    const result = await rpc<string>('generate_cash_flow_indirect', {
+    await requireAuth();
+
+    const result = await rpc<string>("generate_cash_flow_indirect", {
       p_entity_id: entityId,
-      p_period_id: periodId
-    })
+      p_period_id: periodId,
+    });
 
-    eventEmitter.emit('CASH_FLOW_GENERATED', { entityId, periodId })
-
-    return result
+    eventEmitter.emit("CASH_FLOW_GENERATED", { entityId, periodId, result });
+    return result;
   },
 
-  /** -------------------------------------------------------
-   * 4) Run Deferred Tax Posting (IAS 12)
-   *    (MODULE 7)
-   * ------------------------------------------------------ */
+  /** IAS 12 deferred tax */
   async postDeferredTax(entityId: string, year: number) {
-    const result = await rpc<void>('post_deferred_tax_movement', {
-      p_entity: entityId,
-      p_year: year
-    })
+    await requireAuth();
 
-    eventEmitter.emit('DEFERRED_TAX_POSTED', { entityId, year })
-    return result
+    await rpc<void>("post_deferred_tax_movement", {
+      p_entity: entityId,
+      p_year: year,
+    });
+
+    eventEmitter.emit("DEFERRED_TAX_POSTED", { entityId, year });
   },
 
-  /** -------------------------------------------------------
-   * 5) Run ECL Posting (IFRS 9)
-   *    (MODULE 8)
-   * ------------------------------------------------------ */
+  /** IFRS 9 ECL year-end (switched) */
   async postECLMovement(entityId: string, year: number) {
-    const result = await rpc<void>('post_ecl_movement', {
-      p_entity: entityId,
-      p_year: year
-    })
+    await requireAuth();
 
-    eventEmitter.emit('ECL_POSTED', { entityId, year })
-    return result
+    const eventId = await rpc<string>("post_ecl_year_end", {
+      p_entity: entityId,
+      p_year: year,
+    });
+
+    eventEmitter.emit("ECL_POSTED", { entityId, year, eventId });
+    return eventId;
   },
 
-  /** -------------------------------------------------------
-   * 6) Force-regenerate financial statements
-   *    (MODULE 4/5/6)
-   * ------------------------------------------------------ */
+  /** Force-regenerate statement lines for an existing snapshot */
   async rebuildStatements(snapshotId: string) {
-    const result = await rpc<void>('build_financial_statements', {
-      p_snapshot_id: snapshotId
-    })
+    await requireAuth();
 
-    eventEmitter.emit('STATEMENTS_REBUILT', { snapshotId })
-    return result
-  }
-}
+    await rpc<void>("build_financial_statements", { p_snapshot_id: snapshotId });
+
+    eventEmitter.emit("STATEMENTS_REBUILT", { snapshotId });
+  },
+} as const;

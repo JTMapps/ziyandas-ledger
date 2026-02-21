@@ -212,21 +212,25 @@ export async function getEntityTemplateKind(entityId: string): Promise<TemplateK
 // ---------------------------------------------------------------------------
 // Internal helper — post a journal produced by capture rules
 // ---------------------------------------------------------------------------
+function todayYYYYMMDD() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function postJournalFromRule(entityId: string, journal: any) {
   return EventOrchestrator.recordEconomicEvent({
     entityId,
     eventType: journal.eventType,
-    eventDate: new Date().toISOString(),
+    eventDate: todayYYYYMMDD(),
     description: journal.description,
     effects: journal.effects.map((e: any) => ({
       account_id: e.account_id,
-      amount: e.amount,
-      effect_sign: e.effect_sign as 1 | -1,
+      amount: Math.abs(Number(e.amount) || 0),
+      effect_sign: e.effect_sign === -1 ? -1 : 1,
       tax_treatment: e.tax_treatment ?? null,
+      deductible: e.deductible ?? false,
     })),
   });
 }
-
 // ---------------------------------------------------------------------------
 // STEP 6 — JOURNAL ENGINE (Business + Personal + Industry)
 // ✅ Stable wizard API: (entityId, amount, description?)

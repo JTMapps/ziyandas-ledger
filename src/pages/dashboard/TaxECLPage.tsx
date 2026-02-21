@@ -5,6 +5,10 @@ import { useParams } from "react-router-dom";
 
 import { supabase } from "../../lib/supabase";
 import { useYearEnd } from "../../hooks/useYearEnd";
+import { qk } from "../../hooks/queryKeys";
+
+type DeferredTaxItem = Record<string, unknown>;
+type EclItem = Record<string, unknown>;
 
 export default function TaxECLPage() {
   const { entityId } = useParams<{ entityId: string }>();
@@ -14,9 +18,8 @@ export default function TaxECLPage() {
 
   const { postDeferredTax, postECLMovement } = useYearEnd();
 
-  const dtiQuery = useQuery({
-    queryKey: ["deferred-tax", entityId],
-    enabled: !!entityId,
+  const dtiQuery = useQuery<DeferredTaxItem[]>({
+    queryKey: qk.deferredTax(entityId, year),
     queryFn: async () => {
       const { data, error } = await supabase
         .from("deferred_tax_items")
@@ -24,13 +27,12 @@ export default function TaxECLPage() {
         .eq("entity_id", entityId);
 
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as DeferredTaxItem[];
     },
   });
 
-  const eclQuery = useQuery({
-    queryKey: ["ecl", entityId],
-    enabled: !!entityId,
+  const eclQuery = useQuery<EclItem[]>({
+    queryKey: qk.ecl(entityId, year),
     queryFn: async () => {
       const { data, error } = await supabase
         .from("expected_credit_losses")
@@ -38,7 +40,7 @@ export default function TaxECLPage() {
         .eq("entity_id", entityId);
 
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as EclItem[];
     },
   });
 
@@ -52,7 +54,7 @@ export default function TaxECLPage() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">Tax & Expected Credit Losses</h2>
 
-      <div className="flex space-x-4 items-center">
+      <div className="flex flex-wrap gap-4 items-center">
         <input
           type="number"
           value={year}
@@ -64,6 +66,7 @@ export default function TaxECLPage() {
           className="px-4 py-2 bg-black text-white rounded disabled:opacity-50"
           disabled={isBusy}
           onClick={() => postDeferredTax.mutate({ entityId, year })}
+          type="button"
         >
           {postDeferredTax.isPending ? "Posting…" : "Post Deferred Tax"}
         </button>
@@ -72,8 +75,9 @@ export default function TaxECLPage() {
           className="px-4 py-2 bg-black text-white rounded disabled:opacity-50"
           disabled={isBusy}
           onClick={() => postECLMovement.mutate({ entityId, year })}
+          type="button"
         >
-          {postECLMovement.isPending ? "Posting…" : "Post ECL Movement"}
+          {postECLMovement.isPending ? "Posting…" : "Post ECL (Year-End)"}
         </button>
       </div>
 

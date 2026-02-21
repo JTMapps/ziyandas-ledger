@@ -1,94 +1,45 @@
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "../../lib/supabase";
+// src/components/statements/CashFlowIndirect.tsx
+import { useStatement } from "../../hooks/useStatements";
+import type { DbStatementType } from "../../domain/statements/statementTypes";
 
 interface Props {
   entityId: string;
   periodId: string;
 }
 
+const CF_DB_TYPE: DbStatementType = "CASH_FLOW";
+
 export default function CashFlowIndirect({ entityId, periodId }: Props) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["cf-indirect", entityId, periodId],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        "render_financial_statement",
-        {
-          p_entity_id: entityId,
-          p_period_id: periodId,
-          p_statement_type: "CF"
-        }
-      );
-      if (error) throw error;
-      return data; // contains { entity_id, period_id, lines: [...] }
-    }
-  });
+  const statementQuery = useStatement(entityId, periodId, CF_DB_TYPE);
 
-  if (isLoading) return <div>Loading cash flow…</div>;
-  if (!data || !data.lines) return <div>No cash flow data available.</div>;
+  if (statementQuery.isLoading) return <div>Loading cash flow…</div>;
+  if (statementQuery.error)
+    return (
+      <div className="text-red-600 text-sm">
+        Failed to load cash flow:{" "}
+        {String((statementQuery.error as any)?.message ?? statementQuery.error)}
+      </div>
+    );
 
-  const lines = data.lines;
+  const data = statementQuery.data;
+  if (!data || data.lines.length === 0) return <div>No cash flow data available.</div>;
 
-  const operating = lines.filter((x: any) => x.section === "OPERATING");
-  const investing = lines.filter((x: any) => x.section === "INVESTING");
-  const financing = lines.filter((x: any) => x.section === "FINANCING");
-
-  const sum = (rows: any[]) =>
-    rows.reduce((t, r) => t + (Number(r.amount) || 0), 0);
-
+  // With current DB output, we can only render a flat statement.
+  // (To group Operating/Investing/Financing, add 'section' to the SQL output.)
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <h2 className="text-xl font-bold">Cash Flow (Indirect Method)</h2>
 
-      {/* OPERATING */}
-      <section>
-        <h3 className="font-semibold text-gray-700">Operating Activities</h3>
-        <div className="space-y-1 mt-2">
-          {operating.map((row: any) => (
-            <div key={row.code} className="flex justify-between">
-              <span>{row.name}</span>
-              <span>{row.amount?.toLocaleString()}</span>
-            </div>
-          ))}
-          <div className="font-bold flex justify-between pt-2 border-t">
-            <span>Net Cash from Operating Activities</span>
-            <span>{sum(operating).toLocaleString()}</span>
+      <div className="border rounded bg-white shadow-sm p-3">
+        {data.lines.map((row) => (
+          <div key={`${row.code}:${row.order}`} className="flex justify-between py-1">
+            <span>
+              {row.code} — {row.name}
+            </span>
+            <span>{row.amount === null ? "—" : Number(row.amount).toLocaleString()}</span>
           </div>
-        </div>
-      </section>
-
-      {/* INVESTING */}
-      <section>
-        <h3 className="font-semibold text-gray-700">Investing Activities</h3>
-        <div className="space-y-1 mt-2">
-          {investing.map((row: any) => (
-            <div key={row.code} className="flex justify-between">
-              <span>{row.name}</span>
-              <span>{row.amount?.toLocaleString()}</span>
-            </div>
-          ))}
-          <div className="font-bold flex justify-between pt-2 border-t">
-            <span>Net Cash from Investing Activities</span>
-            <span>{sum(investing).toLocaleString()}</span>
-          </div>
-        </div>
-      </section>
-
-      {/* FINANCING */}
-      <section>
-        <h3 className="font-semibold text-gray-700">Financing Activities</h3>
-        <div className="space-y-1 mt-2">
-          {financing.map((row: any) => (
-            <div key={row.code} className="flex justify-between">
-              <span>{row.name}</span>
-              <span>{row.amount?.toLocaleString()}</span>
-            </div>
-          ))}
-          <div className="font-bold flex justify-between pt-2 border-t">
-            <span>Net Cash from Financing Activities</span>
-            <span>{sum(financing).toLocaleString()}</span>
-          </div>
-        </div>
-      </section>
+        ))}
+      </div>
     </div>
   );
 }

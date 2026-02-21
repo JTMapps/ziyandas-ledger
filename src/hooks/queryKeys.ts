@@ -1,4 +1,6 @@
 // src/hooks/queryKeys.ts
+import type { DbStatementType } from "../domain/statements/statementTypes";
+
 export const qk = {
   user: () => ["user"] as const,
   entities: () => ["entities"] as const,
@@ -7,7 +9,7 @@ export const qk = {
   periods: (entityId: string) => ["periods", entityId] as const,
   currentPeriod: (entityId: string) => ["current-period", entityId] as const,
 
-  statement: (entityId: string, periodId: string, statementType: string) =>
+  statement: (entityId: string, periodId: string, statementType: DbStatementType) =>
     ["statement", entityId, periodId, statementType] as const,
 
   entitySnapshot: (entityId: string) => ["entity-snapshot", entityId] as const,
@@ -22,9 +24,7 @@ export const qk = {
   economicEvents: (entityId: string, filters?: Record<string, unknown>) =>
     ["economic-events", entityId, filters ?? {}] as const,
 
-  ecl: (entityId: string, year?: number) =>
-    ["ecl", entityId, year ?? "all"] as const,
-
+  ecl: (entityId: string, year?: number) => ["ecl", entityId, year ?? "all"] as const,
   deferredTax: (entityId: string, year?: number) =>
     ["deferred-tax", entityId, year ?? "all"] as const,
 

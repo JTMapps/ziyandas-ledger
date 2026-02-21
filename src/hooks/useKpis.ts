@@ -1,6 +1,16 @@
+// src/hooks/useKpis.ts
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { qk } from "./queryKeys";
+
+export type EntitySnapshotRow = { label: string; value: number };
+export type EntitySnapshotMap = Record<string, number>;
+
+function toNum(v: unknown) {
+  if (typeof v === "number") return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export function useEntitySnapshot(entityId?: string) {
   const enabled = !!entityId;
@@ -8,29 +18,15 @@ export function useEntitySnapshot(entityId?: string) {
   return useQuery({
     queryKey: enabled ? qk.entitySnapshot(entityId!) : ["entity-snapshot", "disabled"],
     enabled,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_entity_snapshot", {
-        p_entity_id: entityId!,
-      });
+    queryFn: async (): Promise<EntitySnapshotMap> => {
+      const { data, error } = await supabase.rpc("get_entity_snapshot", { p_entity_id: entityId! });
       if (error) throw error;
-      return (data ?? []) as Array<{ label: string; value: number }>;
-    },
-  });
-}
 
-export function usePersonalKpis(entityId?: string, asOf?: string) {
-  const enabled = !!entityId && !!asOf;
-
-  return useQuery({
-    queryKey: enabled ? qk.personalKpis(entityId!, asOf!) : ["personal-kpis", "disabled"],
-    enabled,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_personal_kpis", {
-        p_entity_id: entityId!,
-        p_as_of: asOf!,
-      });
-      if (error) throw error;
-      return data as any;
+      const rows = (data ?? []) as Array<{ label: unknown; value: unknown }>;
+      return rows.reduce<EntitySnapshotMap>((acc, r) => {
+        acc[String(r.label ?? "")] = toNum(r.value);
+        return acc;
+      }, {});
     },
   });
 }

@@ -1,62 +1,65 @@
+// src/pages/dashboard/OverviewPage.tsx
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
+import { qk } from "../../hooks/queryKeys";
 
-interface KPIResult {
+type KPIResult = {
   label: string;
   value: number | string | null;
+};
+
+function toNumber(v: number | string | null): number | null {
+  if (v === null) return null;
+  if (typeof v === "number") return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatValue(v: number | string | null) {
+  const n = toNumber(v);
+  if (n === null) return "—";
+  return n.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function OverviewPage() {
   const { entityId } = useParams<{ entityId: string }>();
+  if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
-  if (!entityId) {
-    return <div className="p-4">Missing entityId in route.</div>;
-  }
-
-  const { data: kpis, isLoading, isError, error } = useQuery<KPIResult[]>({
-    queryKey: ["overview-kpis", entityId],
-    enabled: !!entityId,
+  const kpisQuery = useQuery<KPIResult[]>({
+    queryKey: qk.entitySnapshot(entityId),
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_entity_snapshot", {
         p_entity_id: entityId,
       });
-
       if (error) throw error;
+
+      // DB returns TABLE(label text, value numeric) => array rows
       return Array.isArray(data) ? (data as KPIResult[]) : [];
     },
+    staleTime: 15_000,
   });
 
-  if (isLoading) return <div className="p-4">Loading KPI data…</div>;
+  if (kpisQuery.isLoading) return <div className="p-4">Loading KPI data…</div>;
 
-  if (isError) {
+  if (kpisQuery.isError) {
     return (
       <div className="p-4 text-red-600">
-        Failed to load KPIs: {String((error as any)?.message ?? error)}
+        Failed to load KPIs: {String((kpisQuery.error as any)?.message ?? kpisQuery.error)}
       </div>
     );
   }
 
-  if (!kpis || kpis.length === 0) {
+  const kpis = kpisQuery.data ?? [];
+  if (kpis.length === 0) {
     return (
       <div className="p-4 text-gray-600">
         No KPI data available.
         <br />
-        Try generating a snapshot or adding economic events.
+        Try adding economic events.
       </div>
     );
   }
-
-  const formatValue = (v: any) => {
-    if (v === null || v === undefined) return "—";
-    if (typeof v === "number") {
-      return v.toLocaleString("en-ZA", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-    }
-    return v;
-  };
 
   return (
     <div className="space-y-6">
@@ -64,10 +67,7 @@ export default function OverviewPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {kpis.map((k) => (
-          <div
-            key={k.label}
-            className="border rounded p-4 bg-white shadow-sm flex flex-col"
-          >
+          <div key={k.label} className="border rounded p-4 bg-white shadow-sm flex flex-col">
             <div className="text-sm text-gray-500">{k.label}</div>
             <div className="text-2xl font-bold mt-1">{formatValue(k.value)}</div>
           </div>

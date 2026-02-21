@@ -1,9 +1,9 @@
 // src/pages/dashboard/LedgerPage.tsx
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
-import { supabase } from "../../lib/supabase";
+import { supabase, getEnumValues } from "../../lib/supabase";
 import JournalEntryModal from "../../components/events/JournalEntryModal";
 import { qk } from "../../hooks/queryKeys";
 
@@ -21,12 +21,21 @@ export default function LedgerPage() {
 
   if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
+  // Load DB enum values for event type dropdowns (economic_event_type)
+  const eventTypesQuery = useQuery<string[]>({
+    queryKey: ["enum", "economic_event_type"],
+    queryFn: async () => getEnumValues("economic_event_type"),
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const eventTypes = useMemo(() => eventTypesQuery.data ?? [], [eventTypesQuery.data]);
+
   const eventsQuery = useQuery<LedgerEventRow[]>({
     queryKey: qk.economicEvents(entityId),
     enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("economic_events")
+        .from("economic_events_active")
         .select("id, event_date, description, event_type, created_at")
         .eq("entity_id", entityId)
         .order("event_date", { ascending: false });
@@ -54,16 +63,26 @@ export default function LedgerPage() {
       {showModal && (
         <JournalEntryModal
           entityId={entityId}
-          onClose={() => {
-            setShowModal(false);
-          }}
+          eventTypes={eventTypes}
+          onClose={() => setShowModal(false)}
         />
       )}
 
-      {eventsQuery.error && (
+      {(eventsQuery.error || eventTypesQuery.error) && (
         <div className="text-red-600 text-sm">
-          Failed to load events:{" "}
-          {String((eventsQuery.error as any)?.message ?? eventsQuery.error)}
+          {eventsQuery.error && (
+            <>
+              Failed to load events:{" "}
+              {String((eventsQuery.error as any)?.message ?? eventsQuery.error)}
+            </>
+          )}
+          {eventTypesQuery.error && (
+            <>
+              <br />
+              Failed to load event types:{" "}
+              {String((eventTypesQuery.error as any)?.message ?? eventTypesQuery.error)}
+            </>
+          )}
         </div>
       )}
 
@@ -92,7 +111,7 @@ export default function LedgerPage() {
                 <td className="p-2 border-r">{ev.event_date}</td>
                 <td className="p-2 border-r">{ev.description}</td>
                 <td className="p-2 border-r">{ev.event_type}</td>
-                <td className="p-2">{ev.created_at}</td>
+                <td className="p-2">{new Date(ev.created_at).toLocaleString()}</td>
               </tr>
             ))}
 

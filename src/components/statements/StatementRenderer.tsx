@@ -1,126 +1,88 @@
 // src/components/statements/StatementRenderer.tsx
-
 import React, { useState } from "react";
 import StatementSection from "./StatementSection";
 
-interface StatementLine {
-  account_id: string;
-  code: string;
-  name: string;
-  amount: number;
-  level: number;
-  order: number;
-  is_subtotal?: boolean;
-  section?: string;
-  subsection?: string;
+import type { RenderedStatement } from "../../hooks/useStatements";
+import type { RenderedStatementLine } from "../../domain/statements/types";
+import { DB_STATEMENT_LABEL } from "../../domain/statements/labels";
+
+type Props = { data: RenderedStatement };
+
+function formatAmount(amount: number | null) {
+  if (amount === null) return "—";
+  return Number(amount).toLocaleString();
 }
 
-interface Props {
-  data: {
-    statement_type: string;
-    lines: StatementLine[];
-  };
+function indentStyle(level: number) {
+  const px = Math.min(level * 16, 128);
+  return { paddingLeft: `${px}px` };
 }
 
 export default function StatementRenderer({ data }: Props) {
-  const { statement_type, lines } = data;
+  const title = DB_STATEMENT_LABEL[data.statement_type] ?? data.statement_type;
+
+  const rows: RenderedStatementLine[] = data.lines;
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   function toggle(code: string) {
-    setCollapsed((prev) => ({
-      ...prev,
-      [code]: !prev[code],
-    }));
+    setCollapsed((prev) => ({ ...prev, [code]: !prev[code] }));
   }
-
-  function indent(level: number) {
-    return `pl-${Math.min(level * 4, 32)}`;
-  }
-
-  // ------------------------------
-  // GROUP BY SECTION
-  // ------------------------------
-  const grouped = lines.reduce((acc, line) => {
-    const key = line.section || "OTHER";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(line);
-    return acc;
-  }, {} as Record<string, StatementLine[]>);
-
-  const SECTION_NAMES: Record<string, string> = {
-    ASSETS: "Assets",
-    LIABILITIES: "Liabilities",
-    EQUITY: "Equity",
-    INCOME: "Income",
-    EXPENSES: "Expenses",
-    OCI: "Other Comprehensive Income",
-    OTHER: "Other",
-  };
 
   return (
-    <div className="space-y-8">
-      {/* Title */}
-      <h2 className="text-xl font-bold">
-        {statement_type === "SOFP" && "Statement of Financial Position"}
-        {statement_type === "P&L" && "Profit or Loss"}
-        {statement_type === "OCI" && "Other Comprehensive Income"}
-        {statement_type === "EQUITY" && "Statement of Changes in Equity"}
-      </h2>
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold">{title}</h2>
 
-      {/* Render Sections */}
-      {Object.entries(grouped).map(([section, rows]) => (
-        <StatementSection
-          key={section}
-          title={SECTION_NAMES[section] ?? section}
-        >
+      {rows.length === 0 ? (
+        <div className="text-sm text-gray-600">No lines returned for this statement.</div>
+      ) : (
+        <StatementSection title="Statement">
           <table className="w-full text-sm">
             <tbody>
               {rows.map((line, idx) => {
-                const isGroup = line.level === 0 && !line.is_subtotal;
-                const isSubtotal = !!line.is_subtotal;
+                const isGroup = line.level === 0;
 
-                // Determine visibility based on parent collapse
                 let visible = true;
                 if (line.level > 0) {
                   for (let j = idx - 1; j >= 0; j--) {
                     if (rows[j].level === 0) {
-                      const parent = rows[j];
-                      if (collapsed[parent.code]) visible = false;
+                      if (collapsed[rows[j].code]) visible = false;
                       break;
                     }
                   }
                 }
-
                 if (!visible) return null;
 
+                const key = `${line.code}:${line.order}:${line.account_id ?? "noacct"}`;
+
                 return (
-                  <tr
-                    key={line.account_id + line.code}
-                    className={isSubtotal ? "font-bold bg-gray-50" : ""}
-                  >
-                    <td className={`py-1 ${indent(line.level)}`}>
-                      {isGroup && (
-                        <button
-                          className="mr-2 text-xs text-blue-600"
-                          onClick={() => toggle(line.code)}
-                        >
-                          {collapsed[line.code] ? "▶" : "▼"}
-                        </button>
-                      )}
-                      {line.code} — {line.name}
+                  <tr key={key} className={isGroup ? "font-semibold" : ""}>
+                    <td className="py-1">
+                      <div className="flex items-center" style={indentStyle(line.level)}>
+                        {isGroup && (
+                          <button
+                            type="button"
+                            className="mr-2 text-xs text-blue-600"
+                            onClick={() => toggle(line.code)}
+                            aria-label={collapsed[line.code] ? "Expand group" : "Collapse group"}
+                          >
+                            {collapsed[line.code] ? "▶" : "▼"}
+                          </button>
+                        )}
+                        <span>
+                          {line.code} — {line.name}
+                        </span>
+                      </div>
                     </td>
 
-                    <td className="py-1 text-right font-medium">
-                      {Number(line.amount).toLocaleString()}
-                    </td>
+                    <td className="py-1 text-right font-medium">{formatAmount(line.amount)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </StatementSection>
-      ))}
+      )}
     </div>
   );
 }

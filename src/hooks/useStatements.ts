@@ -1,27 +1,26 @@
+// src/hooks/useStatements.ts
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { qk } from "./queryKeys";
+import type { DbStatementType } from "../domain/statements/statementTypes";
+import type {
+  RenderedStatement as RenderedStatementRaw,
+  RenderedStatementLine,
+} from "../domain/statements/types";
 
-export type RenderedStatementLine = {
-  account_id: string | null;
-  code: string;
-  name: string;
-  level: number;
-  amount: number | null;
-  order: number;
+// UI-safe type: lines is always an array
+export type RenderedStatement = Omit<RenderedStatementRaw, "lines"> & {
+  lines: RenderedStatementLine[];
 };
 
-export type RenderedStatement = {
-  entity_id: string;
-  period_id: string;
-  statement_type: string;
-  lines: RenderedStatementLine[] | null;
-};
+export function useStatement(
+  entityId?: string,
+  periodId?: string,
+  statementType?: DbStatementType
+) {
+  const enabled = Boolean(entityId && periodId && statementType);
 
-export function useStatement(entityId?: string, periodId?: string, statementType?: string) {
-  const enabled = !!entityId && !!periodId && !!statementType;
-
-  return useQuery({
+  return useQuery<RenderedStatement>({
     queryKey: enabled
       ? qk.statement(entityId!, periodId!, statementType!)
       : ["statement", "disabled"],
@@ -32,8 +31,15 @@ export function useStatement(entityId?: string, periodId?: string, statementType
         p_period_id: periodId!,
         p_statement_type: statementType!,
       });
+
       if (error) throw error;
-      return data as RenderedStatement;
+
+      const raw = data as RenderedStatementRaw;
+      return {
+        ...raw,
+        lines: raw.lines ?? [],
+      };
     },
+    staleTime: 30_000,
   });
 }

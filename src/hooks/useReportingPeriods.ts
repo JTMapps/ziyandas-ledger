@@ -1,3 +1,4 @@
+// src/hooks/useReportingPeriods.ts
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { qk } from "./queryKeys";
@@ -10,7 +11,9 @@ export type ReportingPeriod = {
   is_closed: boolean;
 };
 
-export function useReportingPeriods(entityId?: string) {
+type PeriodType = "MONTHLY" | "QUARTERLY" | "ANNUAL";
+
+export function useReportingPeriods(entityId?: string, periodType: PeriodType = "MONTHLY") {
   const qc = useQueryClient();
   const enabled = !!entityId;
 
@@ -32,9 +35,13 @@ export function useReportingPeriods(entityId?: string) {
   const createNextPeriod = useMutation({
     mutationFn: async () => {
       if (!entityId) throw new Error("Missing entityId");
+
+      // ✅ DB signature: create_next_reporting_period(p_entity_id uuid, p_period_type text)
       const { data, error } = await supabase.rpc("create_next_reporting_period", {
         p_entity_id: entityId,
+        p_period_type: periodType,
       });
+
       if (error) throw error;
       return data;
     },
