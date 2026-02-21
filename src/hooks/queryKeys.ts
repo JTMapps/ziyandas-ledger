@@ -29,4 +29,8 @@ export const qk = {
     ["deferred-tax", entityId, year ?? "all"] as const,
 
   templates: () => ["templates"] as const,
+
+  accounts: (entityId: string) => ["accounts", entityId] as const,
+  accountsCount: (entityId: string) => ["accounts-count", entityId] as const,
+  enumValues: (typeName: string) => ["enum", typeName] as const,
 } as const;

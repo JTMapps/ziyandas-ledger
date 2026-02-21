@@ -1,5 +1,4 @@
 // src/pages/personal/PersonalDashboard.tsx
-
 import React, { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
@@ -12,88 +11,57 @@ import TransferWizard from "../../domain/templates/personalCapture/TransferWizar
 type WizardKind = "salary" | "expense" | "transfer" | null;
 
 type PersonalKpis = {
-  cash_balance?: number | null;
-  savings_balance?: number | null;
-  net_worth?: number | null;
-};
-
-type SnapshotRow = {
-  label: string;
-  value: number | string | null;
+  cash_balance: number;
+  savings_balance: number;
+  net_worth: number;
+  as_of?: string; // date
 };
 
 type EconomicEventRow = {
   id: string;
   description: string | null;
-  event_date: string;
-  event_type: string | null;
-  created_at: string;
+  event_date: string; // date
+  event_type: string | null; // economic_event_type
+  created_at: string; // timestamp
 };
 
 export default function PersonalDashboard() {
-  const params = useParams();
-  const entityId = params.entityId;
-
+  const { entityId } = useParams<{ entityId: string }>();
   if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
-  const id: string = entityId; // TS narrowing (string, not undefined)
+  const id = entityId;
 
   const [wizard, setWizard] = useState<WizardKind>(null);
 
-  // ------------------------------------------------------------
-  // KPIs
-  // Prefer get_personal_kpis if it exists; otherwise fallback to get_entity_snapshot
-  // ------------------------------------------------------------
+  // Personal KPI RPC (DB-supported):contentReference[oaicite:8]{index=8}
   const kpiQuery = useQuery<PersonalKpis>({
     queryKey: ["personal-kpis", id],
     enabled: !!id,
     queryFn: async () => {
-      // Attempt personal KPI RPC (if you created it)
-      const { data: personalData, error: personalErr } = await supabase.rpc(
-        "get_personal_kpis",
-        { p_entity_id: id }
-      );
-
-      if (!personalErr && personalData) {
-        // Accept either object or first row of array
-        if (Array.isArray(personalData)) return (personalData[0] ?? {}) as PersonalKpis;
-        return personalData as PersonalKpis;
-      }
-
-      // Fallback to generic snapshot RPC you already use elsewhere
-      const { data: snapData, error: snapErr } = await supabase.rpc("get_entity_snapshot", {
+      const { data, error } = await supabase.rpc("get_personal_kpis", {
         p_entity_id: id,
+        // p_as_of is optional due to DEFAULT CURRENT_DATE:contentReference[oaicite:9]{index=9}
       });
 
-      if (snapErr) {
-        // If personal_kpis doesn't exist, Postgres may return error; we fallback and still might fail.
-        // Throw the fallback error so UI shows something useful.
-        throw snapErr;
-      }
+      if (error) throw error;
 
-      const rows: SnapshotRow[] = Array.isArray(snapData) ? (snapData as SnapshotRow[]) : [];
-
-      // Map “snapshot rows” into a small personal KPI object
-      // (Adjust labels if your RPC returns different strings.)
-      const byLabel = new Map(rows.map((r) => [String(r.label).toLowerCase(), r.value]));
-      const num = (v: unknown) => (typeof v === "number" ? v : v == null ? null : Number(v));
-
+      const obj = (data ?? {}) as Partial<PersonalKpis>;
       return {
-        cash_balance: num(byLabel.get("cash") ?? byLabel.get("cash balance")),
-        savings_balance: num(byLabel.get("savings") ?? byLabel.get("savings balance")),
-        net_worth: num(byLabel.get("net worth") ?? byLabel.get("net_worth")),
+        cash_balance: Number(obj.cash_balance ?? 0),
+        savings_balance: Number(obj.savings_balance ?? 0),
+        net_worth: Number(obj.net_worth ?? 0),
+        as_of: obj.as_of,
       };
     },
+    staleTime: 30_000,
   });
 
-  // ------------------------------------------------------------
-  // Recent events
-  // ------------------------------------------------------------
+  // Recent activity from active view (soft delete safe):contentReference[oaicite:10]{index=10}
   const eventsQuery = useQuery<EconomicEventRow[]>({
     queryKey: ["recent-events", id],
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("economic_events")
+        .from("economic_events_active")
         .select("id, description, event_date, event_type, created_at")
         .eq("entity_id", id)
         .order("event_date", { ascending: false })
@@ -104,7 +72,7 @@ export default function PersonalDashboard() {
     },
   });
 
-  const KPIs = useMemo<PersonalKpis>(() => kpiQuery.data ?? {}, [kpiQuery.data]);
+  const KPIs = useMemo(() => kpiQuery.data, [kpiQuery.data]);
 
   return (
     <div className="space-y-8 p-6">
@@ -115,7 +83,6 @@ export default function PersonalDashboard() {
         </p>
       </div>
 
-      {/* KPI loading / error */}
       {kpiQuery.isLoading && <div className="text-sm text-gray-600">Loading KPIs…</div>}
       {kpiQuery.error && (
         <div className="text-sm text-red-600">
@@ -123,38 +90,24 @@ export default function PersonalDashboard() {
         </div>
       )}
 
-      {/* KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KpiCard label="Cash Balance" value={KPIs.cash_balance} />
-        <KpiCard label="Savings" value={KPIs.savings_balance} />
-        <KpiCard label="Net Worth" value={KPIs.net_worth} />
+        <KpiCard label="Cash Balance" value={KPIs?.cash_balance} />
+        <KpiCard label="Savings" value={KPIs?.savings_balance} />
+        <KpiCard label="Net Worth" value={KPIs?.net_worth} />
       </div>
 
-      {/* Quick actions */}
       <div className="flex flex-wrap gap-3">
-        <button
-          onClick={() => setWizard("salary")}
-          className="px-4 py-2 bg-blue-600 text-white rounded"
-        >
+        <button onClick={() => setWizard("salary")} className="px-4 py-2 bg-blue-600 text-white rounded">
           + Salary
         </button>
-
-        <button
-          onClick={() => setWizard("expense")}
-          className="px-4 py-2 bg-black text-white rounded"
-        >
+        <button onClick={() => setWizard("expense")} className="px-4 py-2 bg-black text-white rounded">
           + Expense
         </button>
-
-        <button
-          onClick={() => setWizard("transfer")}
-          className="px-4 py-2 bg-green-600 text-white rounded"
-        >
+        <button onClick={() => setWizard("transfer")} className="px-4 py-2 bg-green-600 text-white rounded">
           ⇄ Transfer
         </button>
       </div>
 
-      {/* Recent activity */}
       <section className="bg-white border rounded p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Recent Activity</h2>
@@ -185,19 +138,16 @@ export default function PersonalDashboard() {
         </div>
       </section>
 
-      {/* Wizard modals */}
       {wizard === "salary" && (
         <Modal onClose={() => setWizard(null)}>
           <SalaryWizard entityId={id} onClose={() => setWizard(null)} />
         </Modal>
       )}
-
       {wizard === "expense" && (
         <Modal onClose={() => setWizard(null)}>
           <ExpenseWizard entityId={id} onClose={() => setWizard(null)} />
         </Modal>
       )}
-
       {wizard === "transfer" && (
         <Modal onClose={() => setWizard(null)}>
           <TransferWizard entityId={id} onClose={() => setWizard(null)} />
@@ -207,28 +157,23 @@ export default function PersonalDashboard() {
   );
 }
 
-// ------------------------------------------------------------
-// KPI CARD
-// ------------------------------------------------------------
-function KpiCard({ label, value }: { label: string; value?: number | null }) {
+function KpiCard({ label, value }: { label: string; value?: number }) {
   const num = typeof value === "number" ? value : 0;
-
   return (
     <div className="p-4 bg-white border rounded shadow-sm">
       <div className="text-gray-500 text-sm">{label}</div>
-      <div className="text-xl font-bold">{num.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      <div className="text-xl font-bold">
+        {num.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </div>
     </div>
   );
 }
 
-// ------------------------------------------------------------
-// MODAL WRAPPER
-// ------------------------------------------------------------
 function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded shadow-lg p-6 w-full max-w-md relative">
-        <button className="absolute top-2 right-2 text-gray-500" onClick={onClose}>
+        <button type="button" className="absolute top-2 right-2 text-gray-500" onClick={onClose}>
           ✕
         </button>
         {children}

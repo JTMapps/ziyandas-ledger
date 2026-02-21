@@ -231,6 +231,52 @@ async function postJournalFromRule(entityId: string, journal: any) {
     })),
   });
 }
+
+// Add this helper near your other DB helpers
+export async function getExistingTemplateSelection(entityId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("entity_template_selection")
+    .select("template_group_id")
+    .eq("entity_id", entityId)
+    .single();
+
+  // PGRST116 = no rows found
+  if (error && (error as any).code !== "PGRST116") throw error;
+  return (data?.template_group_id as string | undefined) ?? null;
+}
+
+/**
+ * Re-apply existing selected template (no changes to selection allowed).
+ * Use this when template is already selected but accounts are missing.
+ */
+export async function reapplySelectedTemplate(entityId: string): Promise<string> {
+  const templateGroupId = await getExistingTemplateSelection(entityId);
+  if (!templateGroupId) throw new Error("No template selection found for entity.");
+  await applyTemplateToEntity(entityId, templateGroupId);
+  return templateGroupId;
+}
+
+/**
+ * Setup flow:
+ * - If selection exists: DO NOT change it (DB forbids). Just apply it.
+ * - If selection does not exist: assign then apply.
+ */
+export async function setupEntityTemplate(entityId: string, kind: TemplateKind) {
+  const existing = await getExistingTemplateSelection(entityId);
+
+  if (existing) {
+    // DB forbids changing template assignment once set.
+    // We only materialize accounts for the already-selected group.
+    await applyTemplateToEntity(entityId, existing);
+
+    return { kind, template_group_id: existing, reused_existing_selection: true as const };
+  }
+
+  const templateGroupId = await assignTemplateToEntity(entityId, kind);
+  await applyTemplateToEntity(entityId, templateGroupId);
+
+  return { kind, template_group_id: templateGroupId, reused_existing_selection: false as const };
+}
 // ---------------------------------------------------------------------------
 // STEP 6 — JOURNAL ENGINE (Business + Personal + Industry)
 // ✅ Stable wizard API: (entityId, amount, description?)
@@ -385,12 +431,4 @@ export function getTemplateDefinition(kind: TemplateKind): TemplateAccount[] {
 // STEP 7 — HIGH LEVEL SETUP FLOW (selected kind)
 // ✅ assign returns templateGroupId, then apply uses same id
 // ---------------------------------------------------------------------------
-export async function setupEntityTemplate(entityId: string, kind: TemplateKind) {
-  const templateGroupId = await assignTemplateToEntity(entityId, kind);
-  await applyTemplateToEntity(entityId, templateGroupId);
 
-  return {
-    kind,
-    template_group_id: templateGroupId,
-  };
-}

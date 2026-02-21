@@ -1,5 +1,5 @@
 // src/components/events/JournalEntryModal.tsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "../../lib/supabase";
@@ -8,14 +8,16 @@ import AccountPicker from "../pickers/AccountPicker";
 
 interface Props {
   entityId: string;
-  eventTypes: string[]; // economic_event_type enum values from DB
+  eventTypes: string[]; // economic_event_type values from DB
   onClose: () => void;
 }
 
+type EffectSign = 1 | -1;
+
 interface LineItem {
   account_id: string;
-  amount: number;
-  effect_sign: 1 | -1;
+  amount: number; // positive in UI
+  effect_sign: EffectSign;
 }
 
 function todayYYYYMMDD() {
@@ -26,24 +28,38 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
   const qc = useQueryClient();
 
   const [eventDate, setEventDate] = useState<string>(todayYYYYMMDD());
-  const [eventType, setEventType] = useState<string>(eventTypes[0] ?? "");
+  const [eventType, setEventType] = useState<string>(""); // set after enum loads
   const [description, setDescription] = useState("");
+
   const [lines, setLines] = useState<LineItem[]>([
     { account_id: "", amount: 0, effect_sign: 1 },
     { account_id: "", amount: 0, effect_sign: -1 },
   ]);
 
+  // When enum values arrive, pick the first one (or keep existing)
+  useEffect(() => {
+    if (!eventType && eventTypes.length > 0) setEventType(eventTypes[0]);
+  }, [eventType, eventTypes]);
+
   const debitTotal = useMemo(
-    () => lines.filter((l) => l.effect_sign === 1).reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
+    () =>
+      lines
+        .filter((l) => l.effect_sign === 1)
+        .reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
     [lines]
   );
 
   const creditTotal = useMemo(
-    () => lines.filter((l) => l.effect_sign === -1).reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
+    () =>
+      lines
+        .filter((l) => l.effect_sign === -1)
+        .reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
     [lines]
   );
 
-  const isBalanced = Math.abs(debitTotal - creditTotal) < 0.0001;
+  const diff = Math.abs(debitTotal - creditTotal);
+  const hasPositiveTotals = debitTotal > 0 && creditTotal > 0;
+  const isBalanced = hasPositiveTotals && diff < 0.0001;
 
   function addLine() {
     setLines((prev) => [...prev, { account_id: "", amount: 0, effect_sign: 1 }]);
@@ -58,24 +74,29 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
       if (!eventType) throw new Error("Select an event type.");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) throw new Error("Invalid date format.");
       if (lines.length < 2) throw new Error("At least 2 lines (debit + credit) are required.");
-      if (!isBalanced) throw new Error("Journal must balance.");
 
-      if (lines.some((l) => !l.account_id || Number(l.amount) <= 0)) {
-        throw new Error("Each line needs an account and an amount > 0.");
+      // Require selected accounts + positive amounts
+      if (lines.some((l) => !l.account_id)) throw new Error("Each line must have an account.");
+      if (lines.some((l) => Number(l.amount) <= 0)) throw new Error("Each amount must be > 0.");
+
+      if (!isBalanced) {
+        throw new Error(
+          `Journal must balance and totals must be > 0. (Debits=${debitTotal}, Credits=${creditTotal})`
+        );
       }
 
-      // Normalize for DB constraints: amount > 0, sign ∈ {1,-1}
+      // DB expects amount positive + sign controls direction (your trigger enforces balance):contentReference[oaicite:3]{index=3}
       const effects = lines.map((l) => ({
         account_id: l.account_id,
         amount: Math.abs(Number(l.amount) || 0),
-        effect_sign: l.effect_sign === -1 ? -1 : 1,
+        effect_sign: l.effect_sign,
         tax_treatment: null,
         deductible: false,
       }));
 
       const { data, error } = await supabase.rpc("record_economic_event", {
         p_entity_id: entityId,
-        p_event_type: eventType,
+        p_event_type: eventType, // economic_event_type values include CASH_SALE, GENERAL_JOURNAL etc.:contentReference[oaicite:4]{index=4}
         p_event_date: eventDate,
         p_description: description || "",
         p_effects: effects,
@@ -96,13 +117,19 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
     },
   });
 
+  const canSubmit =
+    !postJournalMutation.isPending &&
+    !!eventType &&
+    lines.length >= 2 &&
+    lines.every((l) => !!l.account_id && Number(l.amount) > 0) &&
+    isBalanced;
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded p-6 w-full max-w-2xl space-y-6 shadow-lg">
         <h2 className="text-xl font-bold">Record Journal Entry</h2>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* DATE */}
           <input
             type="date"
             value={eventDate}
@@ -111,7 +138,6 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
             onChange={(e) => setEventDate(e.target.value)}
           />
 
-          {/* EVENT TYPE */}
           <select
             className="border p-2 rounded"
             value={eventType}
@@ -130,7 +156,6 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
           </select>
         </div>
 
-        {/* DESCRIPTION */}
         <textarea
           className="border p-2 w-full rounded"
           placeholder="Description (optional)"
@@ -139,7 +164,6 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
           onChange={(e) => setDescription(e.target.value)}
         />
 
-        {/* JOURNAL LINES */}
         <div className="space-y-3">
           {lines.map((line, i) => (
             <div key={i} className="grid grid-cols-6 gap-2 items-center">
@@ -176,7 +200,7 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
                 value={line.effect_sign}
                 disabled={postJournalMutation.isPending}
                 onChange={(e) => {
-                  const sign = Number(e.target.value) as 1 | -1;
+                  const sign = Number(e.target.value) as EffectSign;
                   setLines((prev) => {
                     const updated = [...prev];
                     updated[i] = { ...updated[i], effect_sign: sign };
@@ -232,7 +256,7 @@ export default function JournalEntryModal({ entityId, eventTypes, onClose }: Pro
 
           <button
             type="button"
-            disabled={postJournalMutation.isPending}
+            disabled={!canSubmit}
             onClick={() => postJournalMutation.mutate()}
             className="bg-black text-white px-4 py-2 rounded disabled:opacity-50"
           >

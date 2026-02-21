@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { qk } from "../../hooks/queryKeys";
 
 type EntityType = "Business" | "Personal";
 
@@ -36,6 +37,8 @@ export default function EntityCreatePage() {
             name: trimmed,
             type: input.type,
             created_by: auth.user.id,
+            // keep explicit so downstream template logic has a stable value
+            industry_type: null,
           },
         ])
         .select("id")
@@ -48,8 +51,7 @@ export default function EntityCreatePage() {
     },
 
     onSuccess: async (entityId) => {
-      // ✅ keep EntitySwitcher + EntityGate + any list in sync
-      await queryClient.invalidateQueries({ queryKey: ["entities"] });
+      await queryClient.invalidateQueries({ queryKey: qk.entities() });
 
       // Next step: template selection
       navigate(`/entities/${entityId}/template`, { replace: true });

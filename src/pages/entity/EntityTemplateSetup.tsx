@@ -19,20 +19,17 @@ import {
   deriveTemplateKindFromEntity,
   TemplateKind,
 } from "../../domain/templates/TemplateOrchestrator";
+import { qk } from "../../hooks/queryKeys";
 
 type EntityRow = {
   id: string;
   name: string;
   type: "Business" | "Personal";
-  industry_type?: string | null; // Generic, Retail, Manufacturing, Services, RealEstate, Hospitality
+  industry_type?: string | null;
 };
 
 type TemplateStatusRow = { template_group_id: string } | null;
 
-/**
- * DB enum mapping — MUST match public.industry_type:
- * Generic, Retail, Manufacturing, Services, RealEstate, Hospitality
- */
 const INDUSTRY_TYPE_BY_KIND: Record<TemplateKind, string | null> = {
   BUSINESS: "Generic",
   PERSONAL: null,
@@ -93,14 +90,10 @@ export default function EntityTemplateSetup() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // ✅ Always call hooks unconditionally
   const [selected, setSelected] = useState<TemplateKind | null>(null);
 
-  // ----------------------------------------------------------
-  // Load entity
-  // ----------------------------------------------------------
   const entityQuery = useQuery<EntityRow>({
-    queryKey: ["entity", id],
+    queryKey: qk.entity(id),
     enabled: !!entityId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -108,15 +101,11 @@ export default function EntityTemplateSetup() {
         .select("id, name, type, industry_type")
         .eq("id", id)
         .single();
-
       if (error) throw error;
       return data as EntityRow;
     },
   });
 
-  // ----------------------------------------------------------
-  // Template already applied?
-  // ----------------------------------------------------------
   const templateStatusQuery = useQuery<TemplateStatusRow>({
     queryKey: ["entity-template", id],
     enabled: !!entityId,
@@ -127,45 +116,61 @@ export default function EntityTemplateSetup() {
         .eq("entity_id", id)
         .single();
 
-      // PGRST116 = no rows found (acceptable)
       if (error && (error as any).code !== "PGRST116") throw error;
       return (data ?? null) as TemplateStatusRow;
     },
   });
 
-  // ----------------------------------------------------------
-  // If already templated, redirect
-  // ----------------------------------------------------------
+  const accountsCountQuery = useQuery<number>({
+    queryKey: ["accounts-count", id],
+    enabled: !!entityId,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("accounts")
+        .select("id", { count: "exact", head: true })
+        .eq("entity_id", id)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 30_000,
+  });
+
+  const hasAccounts = (accountsCountQuery.data ?? 0) > 0;
+  const hasTemplateSelection = Boolean(templateStatusQuery.data?.template_group_id);
+
   useEffect(() => {
     if (!entityId) return;
-    if (templateStatusQuery.isLoading) return;
+    if (templateStatusQuery.isLoading || accountsCountQuery.isLoading) return;
 
-    if (templateStatusQuery.data?.template_group_id) {
+    if (hasTemplateSelection && hasAccounts) {
       navigate(`/entities/${id}/overview`, { replace: true });
     }
-  }, [entityId, id, navigate, templateStatusQuery.isLoading, templateStatusQuery.data]);
+  }, [
+    entityId,
+    id,
+    navigate,
+    templateStatusQuery.isLoading,
+    accountsCountQuery.isLoading,
+    hasTemplateSelection,
+    hasAccounts,
+  ]);
 
-  // ----------------------------------------------------------
-  // Auto-suggest template once entity loads
-  // ----------------------------------------------------------
   useEffect(() => {
     if (!entityQuery.data) return;
     setSelected((prev) => prev ?? deriveTemplateKindFromEntity(entityQuery.data));
   }, [entityQuery.data]);
 
-  // ----------------------------------------------------------
-  // Apply template
-  // ----------------------------------------------------------
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!entityId) throw new Error("Missing entityId in route.");
       if (!selected) throw new Error("Select a template first");
 
-      // 1) Persist industry_type for Business selections
-      // (Personal always null)
       const industry_type = INDUSTRY_TYPE_BY_KIND[selected] ?? null;
 
-      // If it’s a Business template choice, set industry_type (including Generic)
+      // Keep your industry update
       if (selected !== "PERSONAL") {
         const { error: updateErr } = await supabase
           .from("entities")
@@ -175,58 +180,48 @@ export default function EntityTemplateSetup() {
         if (updateErr) throw updateErr;
       }
 
-      // 2) Assign + apply template group in DB (inserts accounts)
+      // ✅ If selection exists, don't try to change it
+      const existing = templateStatusQuery.data?.template_group_id ?? null;
+      if (existing) {
+        // Just materialize accounts for existing group id
+        const { reapplySelectedTemplate } = await import("../../domain/templates/TemplateOrchestrator");
+        return reapplySelectedTemplate(id);
+      }
+
+      // Otherwise normal first-time setup
       return setupEntityTemplate(id, selected);
     },
-
     onSuccess: async () => {
-      // ✅ Critical: invalidate caches so UI updates instantly everywhere
       await Promise.all([
-        // EntityDashboard reads this for type/industry + header
-        queryClient.invalidateQueries({ queryKey: ["entity", id] }),
-
-        // EntitySwitcher uses this list
-        queryClient.invalidateQueries({ queryKey: ["entities"] }),
-
-        // Gate/redirect + “already applied” checks
+        queryClient.invalidateQueries({ queryKey: qk.entity(id) }),
+        queryClient.invalidateQueries({ queryKey: qk.entities() }),
         queryClient.invalidateQueries({ queryKey: ["entity-template", id] }),
 
-        // If you cache accounts in hooks, this prevents “0 accounts” flicker
+        // ✅ critical: accounts + accounts-count
         queryClient.invalidateQueries({ queryKey: ["accounts", id] }),
+        queryClient.invalidateQueries({ queryKey: ["accounts-count", id] }),
 
-        // Safety-net invalidations if your hooks use these keys
-        queryClient.invalidateQueries({ queryKey: ["economic-events", id] }),
-        queryClient.invalidateQueries({ queryKey: ["reporting-periods", id] }),
-        queryClient.invalidateQueries({ queryKey: ["statements", id] }),
+        // optional: ledger/events caches
+        queryClient.invalidateQueries({ queryKey: qk.economicEvents(id) }),
+        queryClient.invalidateQueries({ queryKey: qk.entitySnapshot(id) }),
       ]);
 
       navigate(`/entities/${id}/overview`, { replace: true });
     },
   });
 
-  // ----------------------------------------------------------
-  // Derived UI bits
-  // ----------------------------------------------------------
   const preview = useMemo(() => renderPreview(selected), [selected]);
 
-  // ----------------------------------------------------------
-  // UI states (after hooks)
-  // ----------------------------------------------------------
   if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
-  if (entityQuery.isLoading || templateStatusQuery.isLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        Loading entity…
-      </div>
-    );
+  if (entityQuery.isLoading || templateStatusQuery.isLoading || accountsCountQuery.isLoading) {
+    return <div className="h-screen flex items-center justify-center">Loading entity…</div>;
   }
 
   if (entityQuery.error) {
     return (
       <div className="p-4 text-red-600">
-        Failed to load entity:{" "}
-        {String((entityQuery.error as any)?.message ?? entityQuery.error)}
+        Failed to load entity: {String((entityQuery.error as any)?.message ?? entityQuery.error)}
       </div>
     );
   }
@@ -240,61 +235,40 @@ export default function EntityTemplateSetup() {
     <div className="min-h-screen bg-gray-50 p-8 flex flex-col items-center">
       <div className="w-full max-w-3xl bg-white shadow-lg border rounded p-8 space-y-8">
         <h1 className="text-2xl font-bold">
-          Select Template for{" "}
-          <span className="text-blue-600">{entity.name}</span>
+          Select Template for <span className="text-blue-600">{entity.name}</span>
         </h1>
 
+        {hasTemplateSelection && !hasAccounts && (
+          <div className="border rounded p-4 bg-yellow-50 text-sm">
+            <div className="font-semibold">Template is selected, but accounts are missing.</div>
+            <div className="text-gray-700 mt-1">
+              This means the chart of accounts was not materialized into <code>accounts</code>.
+              Re-apply the template to generate accounts.
+            </div>
+          </div>
+        )}
+
         <p className="text-gray-600">
-          Choose a financial accounting template. Industry templates automatically
-          configure IFRS-compliant accounts tailored to your business model.
+          Choose a financial accounting template. Industry templates automatically configure IFRS-compliant
+          accounts tailored to your business model.
         </p>
 
         <div className="flex flex-wrap gap-4">
           {isBusiness ? (
             <>
-              <TemplateButton
-                label="Business (Standard IFRS)"
-                active={selected === "BUSINESS"}
-                onClick={() => setSelected("BUSINESS")}
-              />
-              <TemplateButton
-                label="Retail Industry"
-                active={selected === "RETAIL"}
-                onClick={() => setSelected("RETAIL")}
-              />
-              <TemplateButton
-                label="Manufacturing"
-                active={selected === "MANUFACTURING"}
-                onClick={() => setSelected("MANUFACTURING")}
-              />
-              <TemplateButton
-                label="Professional Services"
-                active={selected === "SERVICES"}
-                onClick={() => setSelected("SERVICES")}
-              />
-              <TemplateButton
-                label="Real Estate"
-                active={selected === "REAL_ESTATE"}
-                onClick={() => setSelected("REAL_ESTATE")}
-              />
-              <TemplateButton
-                label="Hospitality"
-                active={selected === "HOSPITALITY"}
-                onClick={() => setSelected("HOSPITALITY")}
-              />
+              <TemplateButton label="Business (Standard IFRS)" active={selected === "BUSINESS"} onClick={() => setSelected("BUSINESS")} />
+              <TemplateButton label="Retail Industry" active={selected === "RETAIL"} onClick={() => setSelected("RETAIL")} />
+              <TemplateButton label="Manufacturing" active={selected === "MANUFACTURING"} onClick={() => setSelected("MANUFACTURING")} />
+              <TemplateButton label="Professional Services" active={selected === "SERVICES"} onClick={() => setSelected("SERVICES")} />
+              <TemplateButton label="Real Estate" active={selected === "REAL_ESTATE"} onClick={() => setSelected("REAL_ESTATE")} />
+              <TemplateButton label="Hospitality" active={selected === "HOSPITALITY"} onClick={() => setSelected("HOSPITALITY")} />
             </>
           ) : (
-            <TemplateButton
-              label="Personal Finance Template"
-              active={selected === "PERSONAL"}
-              onClick={() => setSelected("PERSONAL")}
-            />
+            <TemplateButton label="Personal Finance Template" active={selected === "PERSONAL"} onClick={() => setSelected("PERSONAL")} />
           )}
         </div>
 
-        {selected && (
-          <div className="border rounded p-6 bg-gray-50">{preview}</div>
-        )}
+        {selected && <div className="border rounded p-6 bg-gray-50">{preview}</div>}
 
         <button
           type="button"
@@ -306,7 +280,11 @@ export default function EntityTemplateSetup() {
               : "bg-gray-400 cursor-not-allowed"
           }`}
         >
-          {applyMutation.isPending ? "Applying Template…" : "Apply Template"}
+          {applyMutation.isPending
+            ? "Applying Template…"
+            : hasTemplateSelection && !hasAccounts
+              ? "Re-Apply Template"
+              : "Apply Template"}
         </button>
 
         {applyMutation.error && (
