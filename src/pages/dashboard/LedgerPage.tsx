@@ -1,38 +1,151 @@
 // src/pages/dashboard/LedgerPage.tsx
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+//
+// Wired to the actual wizard pages that exist in /src/pages/industryCapture/
+// and /src/domain/templates/personalCapture/.
+// Reads entity.industry_type via direct supabase query to show the right quick-capture
+// actions for the current entity's industry.
+
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-
-import { supabase, getEnumValues } from "../../lib/supabase";
-import JournalEntryModal from "../../components/events/JournalEntryModal";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "../../lib/supabase";
 import { qk } from "../../hooks/queryKeys";
+import { useEvents } from "../../hooks/useEconomicEvents";
+import JournalEntryModal from "../../components/events/JournalEntryModal";
+// ─── Capture action definitions ───────────────────────────────────────────────
+// Routes match the actual file paths in /src/pages/industryCapture/ and
+// /src/domain/templates/personalCapture/. All paths are relative to
+// /entities/:entityId/
 
-type LedgerEventRow = {
-  id: string;
-  event_date: string;
-  description: string | null;
-  event_type: string | null;
-  created_at: string;
+type Category = "income" | "expense" | "asset" | "equity" | "transfer";
+
+interface CaptureAction {
+  label: string;
+  description: string;
+  route: string;
+  icon: string;
+  category: Category;
+}
+
+// Generic business (no industry specialisation)
+const GENERIC_BUSINESS: CaptureAction[] = [
+  { label: "Cash Sale",         description: "Record revenue received in cash",       route: "capture/general/cash-sale",        icon: "💵", category: "income"   },
+  { label: "Credit Sale",       description: "Invoice a customer — creates receivable", route: "capture/general/credit-sale",    icon: "🧾", category: "income"   },
+  { label: "Cash Expense",      description: "Expense paid directly from cash",        route: "capture/general/cash-expense",    icon: "📤", category: "expense"  },
+  { label: "Expense on Credit", description: "Bill received, not yet paid",            route: "capture/general/credit-expense",  icon: "📋", category: "expense"  },
+  { label: "Asset Purchase",    description: "Buy a long-term asset for cash",         route: "capture/general/asset-purchase",  icon: "🏗️", category: "asset"    },
+  { label: "Depreciation",      description: "Record period depreciation charge",      route: "capture/general/depreciation",    icon: "📉", category: "asset"    },
+  { label: "Loan Received",     description: "Borrow funds — creates liability",       route: "capture/general/loan-received",   icon: "🏦", category: "equity"   },
+  { label: "Loan Repaid",       description: "Repay principal on a loan",              route: "capture/general/loan-repaid",     icon: "↩️", category: "equity"   },
+  { label: "Owner Investment",  description: "Capital contributed by the owner",       route: "capture/general/owner-investment",icon: "💼", category: "equity"   },
+  { label: "Owner Withdrawal",  description: "Drawings taken by the owner",            route: "capture/general/owner-withdrawal",icon: "💸", category: "equity"   },
+];
+
+// Industry-specific actions — routes match actual wizard files
+const RETAIL_ACTIONS: CaptureAction[] = [
+  { label: "Retail Sale",         description: "Record a retail sale with COGS",   route: "capture/industry/retail-sale",             icon: "🛒", category: "income"  },
+  { label: "Purchase Inventory",  description: "Buy inventory from a supplier",    route: "capture/industry/retail-purchase",          icon: "📦", category: "expense" },
+  ...GENERIC_BUSINESS.filter(a => ["Asset Purchase","Depreciation","Loan Received","Loan Repaid","Owner Investment","Owner Withdrawal"].includes(a.label)),
+];
+
+const MANUFACTURING_ACTIONS: CaptureAction[] = [
+  { label: "Consume Raw Materials",   description: "Move materials to WIP",        route: "capture/industry/manufacturing-consume",   icon: "⚙️", category: "expense" },
+  { label: "Complete Production Batch", description: "Move WIP to finished goods", route: "capture/industry/manufacturing-complete",  icon: "🏭", category: "income"  },
+  ...GENERIC_BUSINESS.filter(a => ["Cash Sale","Credit Sale","Asset Purchase","Depreciation","Owner Investment","Owner Withdrawal"].includes(a.label)),
+];
+
+const SERVICES_ACTIONS: CaptureAction[] = [
+  { label: "Client Invoice",    description: "Invoice a client for services rendered", route: "capture/industry/services-invoice",    icon: "📨", category: "income"  },
+  { label: "Pay Contractor",    description: "Pay an external contractor",             route: "capture/industry/services-contractor", icon: "🤝", category: "expense" },
+  ...GENERIC_BUSINESS.filter(a => ["Cash Expense","Expense on Credit","Loan Received","Owner Investment","Owner Withdrawal"].includes(a.label)),
+];
+
+const REAL_ESTATE_ACTIONS: CaptureAction[] = [
+  { label: "Rent Income",        description: "Tenant rental payment received",         route: "capture/industry/realestate-rent",        icon: "🏠", category: "income"  },
+  { label: "Maintenance Expense", description: "Property maintenance or repair cost",  route: "capture/industry/realestate-maintenance", icon: "🔧", category: "expense" },
+  ...GENERIC_BUSINESS.filter(a => ["Asset Purchase","Depreciation","Loan Received","Loan Repaid","Owner Investment","Owner Withdrawal"].includes(a.label)),
+];
+
+const HOSPITALITY_ACTIONS: CaptureAction[] = [
+  { label: "Room Sale",     description: "Room night revenue",              route: "capture/industry/hospitality-room",    icon: "🛏️", category: "income"  },
+  { label: "Meal Service",  description: "Food & beverage service revenue", route: "capture/industry/hospitality-meal",    icon: "🍽️", category: "income"  },
+  ...GENERIC_BUSINESS.filter(a => ["Cash Expense","Expense on Credit","Asset Purchase","Depreciation","Owner Investment","Owner Withdrawal"].includes(a.label)),
+];
+
+const PERSONAL_ACTIONS: CaptureAction[] = [
+  { label: "Salary / Income",  description: "Record a salary or income received",    route: "capture/personal/salary",   icon: "💰", category: "income"   },
+  { label: "Expense",          description: "Record a personal expense",             route: "capture/personal/expense",  icon: "🧾", category: "expense"  },
+  { label: "Transfer",         description: "Move money between your accounts",      route: "capture/personal/transfer", icon: "↔️", category: "transfer" },
+];
+
+// Map industry_type → action set
+// industry_type values match what's stored in entities.industry_type
+const ACTIONS_BY_INDUSTRY: Record<string, CaptureAction[]> = {
+  Generic:       GENERIC_BUSINESS,
+  Retail:        RETAIL_ACTIONS,
+  Manufacturing: MANUFACTURING_ACTIONS,
+  Services:      SERVICES_ACTIONS,
+  RealEstate:    REAL_ESTATE_ACTIONS,
+  Hospitality:   HOSPITALITY_ACTIONS,
+  Personal:      PERSONAL_ACTIONS,
 };
 
+const CATEGORY_STYLE: Record<Category | "transfer", string> = {
+  income:   "bg-emerald-50 border-emerald-200 hover:bg-emerald-100",
+  expense:  "bg-rose-50    border-rose-200    hover:bg-rose-100",
+  asset:    "bg-sky-50     border-sky-200     hover:bg-sky-100",
+  equity:   "bg-violet-50  border-violet-200  hover:bg-violet-100",
+  transfer: "bg-amber-50   border-amber-200   hover:bg-amber-100",
+};
+
+const CATEGORY_LABEL_STYLE: Record<Category | "transfer", string> = {
+  income:   "text-emerald-700",
+  expense:  "text-rose-700",
+  asset:    "text-sky-700",
+  equity:   "text-violet-700",
+  transfer: "text-amber-700",
+};
+
+const ALL_CATEGORIES: Array<Category | "all"> = ["all", "income", "expense", "asset", "equity", "transfer"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function LedgerPage() {
-  const { entityId } = useParams<{ entityId: string }>();
-  const navigate = useNavigate();
-  const [showModal, setShowModal] = useState(false);
+  const { entityId }      = useParams<{ entityId: string }>();
+  const navigate          = useNavigate();
+  const [showModal, setShowModal]           = useState(false);
+  const [activeCategory, setActiveCategory] = useState<Category | "all">("all");
 
   if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
-  const eventTypesQuery = useQuery<string[]>({
-    queryKey: qk.enumValues("economic_event_type"),
-    queryFn: async () => getEnumValues("economic_event_type"),
-    staleTime: 60 * 60 * 1000,
+  // Fetch entity row directly — avoids depending on EntityProvider being in scope
+  const { data: entity } = useQuery({
+    queryKey: ["entity", entityId],
+    enabled: !!entityId,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("entities")
+        .select("id, type, industry_type")
+        .eq("id", entityId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
   });
 
-  const eventTypes = useMemo(() => eventTypesQuery.data ?? [], [eventTypesQuery.data]);
+  // Derive industry — falls back to "Generic" while loading or if unset
+  const industryType  = entity?.type === "Personal"
+    ? "Personal"
+    : (entity?.industry_type ?? "Generic");
 
+  const actions = ACTIONS_BY_INDUSTRY[industryType] ?? GENERIC_BUSINESS;
+
+  // ── Accounts check ────────────────────────────────────────────────────────
   const accountsCountQuery = useQuery<number>({
     queryKey: qk.accountsCount(entityId),
     enabled: !!entityId,
+    staleTime: 30_000,
     queryFn: async () => {
       const { count, error } = await supabase
         .from("accounts")
@@ -40,148 +153,203 @@ export default function LedgerPage() {
         .eq("entity_id", entityId)
         .eq("is_active", true)
         .is("deleted_at", null);
-
       if (error) throw error;
       return count ?? 0;
     },
-    staleTime: 30_000,
   });
 
   const hasAccounts = (accountsCountQuery.data ?? 0) > 0;
 
-  const eventsQuery = useQuery<LedgerEventRow[]>({
-    queryKey: qk.economicEvents(entityId),
-    enabled: !!entityId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("economic_events_active")
-        .select("id, event_date, description, event_type, created_at")
-        .eq("entity_id", entityId)
-        .order("event_date", { ascending: false });
+  // ── Events ────────────────────────────────────────────────────────────────
+  const eventsQuery = useEvents(entityId);
+  const events      = eventsQuery.data ?? [];
 
-      if (error) throw error;
-      return (data ?? []) as LedgerEventRow[];
-    },
-  });
+  // ── Filtered actions ──────────────────────────────────────────────────────
+  const visibleActions = activeCategory === "all"
+    ? actions
+    : actions.filter(a => a.category === activeCategory);
 
-  const events = eventsQuery.data ?? [];
-  const canOpenModal = hasAccounts && eventTypes.length > 0 && !eventTypesQuery.isLoading;
+  // Available filter categories for this industry
+  const availableCategories = ["all", ...new Set(actions.map(a => a.category))] as Array<Category | "all">;
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-8">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Ledger / Economic Events</h2>
+    <div className="space-y-8 max-w-5xl mx-auto">
 
-        <button
-          type="button"
-          className="px-4 py-2 bg-black text-white rounded shadow disabled:opacity-50"
-          onClick={() => setShowModal(true)}
-          disabled={!canOpenModal}
-          title={
-            !hasAccounts
-              ? "Apply a template to create accounts first."
-              : eventTypes.length === 0
-                ? "No economic_event_type values found in DB."
-                : "Record a journal entry"
-          }
-        >
-          + Record Journal Entry
-        </button>
+      {/* ── Header ── */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold">Ledger</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {industryType !== "Generic" && industryType !== "Personal"
+              ? `${industryType} entity · `
+              : ""}
+            Record activity · View event history
+          </p>
+        </div>
+        {hasAccounts && (
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-colors"
+            title="Manual general journal entry — for accountants"
+          >
+            General Journal ↗
+          </button>
+        )}
       </div>
 
+      {/* ── No accounts warning ── */}
       {!accountsCountQuery.isLoading && !hasAccounts && (
-        <div className="border rounded p-4 bg-yellow-50 text-sm space-y-2">
-          <div className="font-semibold">No accounts found for this entity.</div>
-          <div className="text-gray-700">
-            This usually means the template wasn’t applied (no chart of accounts was materialized into{" "}
-            <code>accounts</code>). Go to the entity’s template setup and apply one.
-          </div>
-
-          <div className="flex gap-3">
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 space-y-3 text-sm">
+          <div className="font-semibold text-yellow-900">No chart of accounts found.</div>
+          <p className="text-yellow-800 text-xs leading-relaxed">
+            A chart of accounts is required before recording any events.
+            Go to template setup to apply one for this entity.
+          </p>
+          <div className="flex gap-2">
             <button
-              type="button"
-              className="px-3 py-2 rounded bg-blue-600 text-white"
+              className="px-3 py-1.5 rounded bg-yellow-700 text-white text-xs hover:bg-yellow-800"
               onClick={() => navigate(`/entities/${entityId}/template`)}
             >
               Go to Template Setup
             </button>
-
             <button
-              type="button"
-              className="px-3 py-2 rounded border"
+              className="px-3 py-1.5 rounded border border-yellow-400 text-xs hover:bg-yellow-100"
               onClick={() => accountsCountQuery.refetch()}
             >
-              Re-check Accounts
+              Re-check
             </button>
           </div>
         </div>
       )}
 
-      {showModal && (
-        <JournalEntryModal
-          entityId={entityId}
-          eventTypes={eventTypes}
-          onClose={() => setShowModal(false)}
-        />
+      {/* ── Quick capture ── */}
+      {hasAccounts && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              Quick Capture
+            </h3>
+
+            {/* Category filter pills — only show categories that exist for this industry */}
+            <div className="flex gap-1.5">
+              {availableCategories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat as Category | "all")}
+                  className={`px-2.5 py-1 rounded-full border text-xs capitalize transition-colors ${
+                    activeCategory === cat
+                      ? "bg-gray-900 text-white border-gray-900"
+                      : "border-gray-200 text-gray-500 hover:border-gray-400"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+            {visibleActions.map(action => (
+              <button
+                key={action.label}
+                type="button"
+                onClick={() => navigate(`/entities/${entityId}/${action.route}`)}
+                className={`text-left p-3.5 rounded-lg border transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 ${
+                  CATEGORY_STYLE[action.category]
+                }`}
+              >
+                <div className="text-2xl mb-2 leading-none">{action.icon}</div>
+                <div className="font-semibold text-sm text-gray-900 leading-tight">{action.label}</div>
+                <div className={`text-xs mt-0.5 leading-snug opacity-80 ${CATEGORY_LABEL_STYLE[action.category]}`}>
+                  {action.description}
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
-      {(eventsQuery.error || eventTypesQuery.error || accountsCountQuery.error) && (
-        <div className="text-red-600 text-sm whitespace-pre-wrap">
-          {eventsQuery.error
-            ? `Failed to load events: ${String((eventsQuery.error as any)?.message ?? eventsQuery.error)}\n`
-            : ""}
-          {eventTypesQuery.error
-            ? `Failed to load event types: ${String(
-                (eventTypesQuery.error as any)?.message ?? eventTypesQuery.error
-              )}\n`
-            : ""}
-          {accountsCountQuery.error
-            ? `Failed to check accounts: ${String(
-                (accountsCountQuery.error as any)?.message ?? accountsCountQuery.error
-              )}\n`
-            : ""}
+      {/* ── Event history ── */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            Event History
+          </h3>
+          {events.length > 0 && (
+            <span className="text-xs text-gray-400">{events.length} event{events.length !== 1 ? "s" : ""}</span>
+          )}
+        </div>
+
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 w-28">Date</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400">Description</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 w-48">Type</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 w-36">Recorded</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+
+              {eventsQuery.isLoading && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
+              )}
+
+              {!eventsQuery.isLoading && events.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center">
+                    <div className="text-gray-400 text-sm">No events recorded yet.</div>
+                    {hasAccounts && (
+                      <div className="text-gray-300 text-xs mt-1">
+                        Use Quick Capture above to record your first transaction.
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
+
+              {events.map(ev => (
+                <tr key={ev.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{ev.event_date}</td>
+                  <td className="px-4 py-3 text-gray-800 text-sm">
+                    {ev.description ?? <span className="text-gray-300 italic text-xs">No description</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {ev.event_type && (
+                      <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs font-mono">
+                        {ev.event_type}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-400">
+                    {new Date(ev.created_at).toLocaleString("en-ZA", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                  </td>
+                </tr>
+              ))}
+
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ── Errors ── */}
+      {(eventsQuery.error || accountsCountQuery.error) && (
+        <div className="text-xs rounded bg-red-50 border border-red-200 p-3 text-red-600 space-y-1">
+          {eventsQuery.error && <div>Events: {String((eventsQuery.error as any)?.message)}</div>}
+          {accountsCountQuery.error && <div>Accounts: {String((accountsCountQuery.error as any)?.message)}</div>}
         </div>
       )}
 
-      <div className="bg-white border rounded shadow-sm overflow-hidden">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-100 border-b">
-            <tr>
-              <th className="p-2 border-r">Date</th>
-              <th className="p-2 border-r">Description</th>
-              <th className="p-2 border-r">Type</th>
-              <th className="p-2">Created</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {eventsQuery.isLoading && (
-              <tr>
-                <td className="p-4 text-center" colSpan={4}>
-                  Loading…
-                </td>
-              </tr>
-            )}
-
-            {events.map((ev) => (
-              <tr key={ev.id} className="border-b hover:bg-gray-50">
-                <td className="p-2 border-r">{ev.event_date}</td>
-                <td className="p-2 border-r">{ev.description ?? "—"}</td>
-                <td className="p-2 border-r">{ev.event_type ?? "—"}</td>
-                <td className="p-2">{new Date(ev.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
-
-            {!eventsQuery.isLoading && events.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-center p-4 text-gray-500">
-                  No events recorded yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* ── General journal escape hatch ── */}
+      {showModal && (
+        <JournalEntryModal entityId={entityId} onClose={() => setShowModal(false)} />
+      )}
     </div>
   );
 }

@@ -9,3 +9,13 @@ export async function rpc<T>(fn: string, params: Record<string, unknown>): Promi
   }
   return data as T;
 }
+
+export async function closeFinancialYearEnterprise(entityId: string, year: number) {
+  const { data, error } = await supabase.rpc("close_financial_year_enterprise", {
+    p_entity_id: entityId,
+    p_year: year,
+  });
+
+  if (error) throw error;
+  return data; // likely UUID of the close event
+}

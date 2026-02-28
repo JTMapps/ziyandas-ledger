@@ -1,0 +1,39 @@
+// src/domain/events/eventTypes.ts
+
+export const ECONOMIC_EVENT_TYPES = [
+  "CASH_SALE",
+  "CREDIT_SALE",
+  "REVENUE_REFUND",
+  "CASH_EXPENSE",
+  "EXPENSE_ON_CREDIT",
+  "ASSET_PURCHASED_CASH",
+  "ASSET_SOLD_WITH_GAIN",
+  "DEPRECIATION",
+  "LOAN_RECEIVED",
+  "LOAN_REPAID",
+  "OWNER_INVESTMENT",
+  "OWNER_WITHDRAWAL",
+  "GENERAL_JOURNAL",
+  "PERIOD_CLOSE",
+  "OPENING_BALANCE",
+  "CASH_FLOW_STATEMENT",
+] as const;
+
+export type EconomicEventType = typeof ECONOMIC_EVENT_TYPES[number];
+
+// User-facing event types only (excludes system-generated ones)
+export const CAPTURABLE_EVENT_TYPES: EconomicEventType[] = [
+  "CASH_SALE",
+  "CREDIT_SALE",
+  "REVENUE_REFUND",
+  "CASH_EXPENSE",
+  "EXPENSE_ON_CREDIT",
+  "ASSET_PURCHASED_CASH",
+  "ASSET_SOLD_WITH_GAIN",
+  "DEPRECIATION",
+  "LOAN_RECEIVED",
+  "LOAN_REPAID",
+  "OWNER_INVESTMENT",
+  "OWNER_WITHDRAWAL",
+  "GENERAL_JOURNAL",
+];

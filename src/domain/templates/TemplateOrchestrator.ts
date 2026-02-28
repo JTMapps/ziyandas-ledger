@@ -150,6 +150,21 @@ export async function applyTemplateToEntity(
   }
 }
 
+// Add this function alongside applyTemplateToEntity
+export async function forceApplyTemplateToEntity(
+  entityId: string,
+  templateGroupId: string
+): Promise<void> {
+  const { error } = await supabase.rpc("apply_template_to_entity_force", {
+    p_entity_id: entityId,
+    p_template_group_id: templateGroupId,
+  });
+  if (error) {
+    console.error("apply_template_to_entity_force failed:", error);
+    throw error;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // STEP 3 — FETCH APPLIED ACCOUNTS
 // ---------------------------------------------------------------------------
@@ -252,7 +267,7 @@ export async function getExistingTemplateSelection(entityId: string): Promise<st
 export async function reapplySelectedTemplate(entityId: string): Promise<string> {
   const templateGroupId = await getExistingTemplateSelection(entityId);
   if (!templateGroupId) throw new Error("No template selection found for entity.");
-  await applyTemplateToEntity(entityId, templateGroupId);
+  await forceApplyTemplateToEntity(entityId, templateGroupId); // was: applyTemplateToEntity
   return templateGroupId;
 }
 

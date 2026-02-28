@@ -1,127 +1,80 @@
-// -----------------------------------------------------------
-// StatementOrchestrator.ts
-// Enterprise-grade orchestration for building & rendering
-// financial statements (SOFP, P&L, OCI, CF).
-// -----------------------------------------------------------
+// src/orchestrators/StatementOrchestrator.ts
+import { supabase } from "../lib/supabase";
+import { eventEmitter } from "../lib/eventEmitter";
+import { rpc } from "../lib/rpc";
+import { requireAuth } from "../lib/auth";
+import type { RenderedStatement } from "../domain/statements/types";
+import type { DbStatementType } from "../domain/statements/statementTypes";
 
-import { supabase } from '../lib/supabase'
-import { eventEmitter } from '../lib/eventEmitter'
+type SnapshotType = "DRAFT" | "FINAL" | "AUDITED";
 
-// -----------------------------------------------------------
-// RPC Wrapper
-// -----------------------------------------------------------
-async function rpc<T>(fn: string, params: any): Promise<T> {
-  const { data, error } = await supabase.rpc(fn, params)
-
-  if (error) {
-    console.error(`[RPC ERROR] ${fn}`, error)
-    throw new Error(error.message)
-  }
-
-  return data as T
-}
-
-// -----------------------------------------------------------
-// Ensure authentication
-// -----------------------------------------------------------
-async function requireAuth() {
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser()
-
-  if (error || !user) throw new Error('User not authenticated')
-
-  return user
-}
-
-// -----------------------------------------------------------
-// Public API
-// -----------------------------------------------------------
 export const StatementOrchestrator = {
-  /** -------------------------------------------------------
-   * Create a new snapshot (DRAFT)
-   * ------------------------------------------------------ */
-  async createSnapshot(entityId: string, periodId: string, statementType: string) {
-    const user = await requireAuth()
+  /**
+   * Create a snapshot row (DRAFT).
+   * Keep this only if you truly use snapshot/lines tables in your UI flow.
+   */
+  async createSnapshot(entityId: string, periodId: string, statementType: DbStatementType) {
+    await requireAuth();
 
-    const { data, error } = await supabase
-      .from('financial_statement_snapshots')
-      .insert([
-        {
-          entity_id: entityId,
-          reporting_period_id: periodId,
-          statement_type: statementType,
-          snapshot_type: 'DRAFT',
-          financial_year: null, // backend may override
-          generated_at: new Date().toISOString()
-        }
-      ])
-      .select('id')
-      .single()
-
-    if (error) throw new Error(error.message)
-
-    const snapshotId = data.id
-
-    eventEmitter.emit('SNAPSHOT_CREATED', { snapshotId, statementType })
-
-    return snapshotId
-  },
-
-  /** -------------------------------------------------------
-   * Build ALL lines for a snapshot (SOFP / P&L / OCI / CF)
-   * Uses backend module build_financial_statements()
-   * ------------------------------------------------------ */
-  async rebuildSnapshot(snapshotId: string) {
-    await rpc<void>('build_financial_statements', {
-      p_snapshot_id: snapshotId
-    })
-
-    eventEmitter.emit('STATEMENT_REBUILT', { snapshotId })
-  },
-
-  /** -------------------------------------------------------
-   * Render statement (RPC render_financial_statement)
-   * Returns snapshot_id (uuid)
-   * ------------------------------------------------------ */
-  async renderStatement(entityId: string, periodId: string, statementType: string) {
-    const snapshotId = await rpc<string>('render_financial_statement', {
+    const snapshotId = await rpc<string>("create_financial_snapshot", {
       p_entity_id: entityId,
       p_period_id: periodId,
-      p_statement_type: statementType
-    })
+      p_statement_type: statementType,
+      p_snapshot_type: "DRAFT",
+    });
 
-    eventEmitter.emit('STATEMENT_RENDERED', { snapshotId, statementType })
-    return snapshotId
+    eventEmitter.emit("SNAPSHOT_CREATED", { snapshotId, statementType });
+    return snapshotId;
   },
 
-  /** -------------------------------------------------------
-   * Load statement lines for UI
-   * ------------------------------------------------------ */
+  /** Build lines for an existing snapshot */
+  async rebuildSnapshot(snapshotId: string) {
+    await requireAuth();
+    await rpc<void>("build_financial_statements", { p_snapshot_id: snapshotId });
+    eventEmitter.emit("STATEMENT_REBUILT", { snapshotId });
+  },
+
+  /**
+   * Render statement via DB RPC.
+   * IMPORTANT: your DB signature RETURNS json, not uuid.
+   */
+  async renderStatement(entityId: string, periodId: string, statementType: DbStatementType) {
+    await requireAuth();
+
+    const rendered = await rpc<RenderedStatement>("render_financial_statement", {
+      p_entity_id: entityId,
+      p_period_id: periodId,
+      p_statement_type: statementType,
+    });
+
+    eventEmitter.emit("STATEMENT_RENDERED", { entityId, periodId, statementType });
+    return rendered;
+  },
+
+  /** Optional: load statement lines table (only needed if UI uses snapshot lines directly) */
   async getStatementLines(snapshotId: string) {
+    await requireAuth();
+
     const { data, error } = await supabase
-      .from('financial_statement_lines')
-      .select('*')
-      .eq('snapshot_id', snapshotId)
-      .order('display_order')
+      .from("financial_statement_lines")
+      .select("*")
+      .eq("snapshot_id", snapshotId)
+      .order("display_order", { ascending: true });
 
-    if (error) throw new Error(error.message)
-
-    return data
+    if (error) throw new Error(error.message);
+    return data ?? [];
   },
 
-  /** -------------------------------------------------------
-   * Mark snapshot FINAL
-   * ------------------------------------------------------ */
+  /** Mark snapshot FINAL (DB triggers/indexes will enforce lock/uniqueness rules) */
   async finalizeSnapshot(snapshotId: string) {
+    await requireAuth();
+
     const { error } = await supabase
-      .from('financial_statement_snapshots')
-      .update({ snapshot_type: 'FINAL' })
-      .eq('id', snapshotId)
+      .from("financial_statement_snapshots")
+      .update({ snapshot_type: "FINAL" satisfies SnapshotType })
+      .eq("id", snapshotId);
 
-    if (error) throw new Error(error.message)
-
-    eventEmitter.emit('SNAPSHOT_FINALIZED', { snapshotId })
-  }
-}
+    if (error) throw new Error(error.message);
+    eventEmitter.emit("SNAPSHOT_FINALIZED", { snapshotId });
+  },
+} as const;

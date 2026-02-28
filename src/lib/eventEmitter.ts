@@ -26,7 +26,7 @@ class EventEmitter {
 
 export const eventEmitter = new EventEmitter()
 
-// Optional: strongly-typed event names (nice-to-have)
+    //strongly-typed event names
 export const DomainEvents = {
   ECONOMIC_EVENT_RECORDED: 'ECONOMIC_EVENT_RECORDED',
   STATEMENT_RENDERED: 'STATEMENT_RENDERED',

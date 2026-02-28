@@ -1,14 +1,25 @@
 // src/components/events/JournalEntryModal.tsx
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+//
+// ARCHITECTURE NOTE:
+// This modal is the ESCAPE HATCH for power users / accountants.
+// Normal users should never reach here — they use the industry wizards
+// (RetailSaleWizard, ServicesClientInvoiceWizard, etc.) which call
+// TemplateJournalEngine and construct journal entries automatically.
+//
+// This raw form is intentionally restricted to GENERAL_JOURNAL only
+// to signal that intent: if you know what accounts to debit/credit,
+// you may post here. All other event types belong in their wizards.
+//
+// The parent account error ("Cannot post to parent account") is enforced
+// by the DB trigger prevent_posting_to_parent_account. This modal now
+// surfaces that constraint clearly in the UI by showing account hierarchy.
 
-import { supabase } from "../../lib/supabase";
-import { qk } from "../../hooks/queryKeys";
+import { useMemo, useState } from "react";
 import AccountPicker from "../pickers/AccountPicker";
+import { useRecordEconomicEvent } from "../../hooks/useEconomicEvents";
 
 interface Props {
   entityId: string;
-  eventTypes: string[]; // economic_event_type values from DB
   onClose: () => void;
 }
 
@@ -16,251 +27,261 @@ type EffectSign = 1 | -1;
 
 interface LineItem {
   account_id: string;
-  amount: number; // positive in UI
+  account_label: string; // display name to catch parent accounts visually
+  amount: string;        // string for controlled input, parse on submit
   effect_sign: EffectSign;
 }
 
-function todayYYYYMMDD() {
+function todayYYYYMMDD(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function JournalEntryModal({ entityId, eventTypes, onClose }: Props) {
-  const qc = useQueryClient();
+function makeBlankLine(sign: EffectSign = 1): LineItem {
+  return { account_id: "", account_label: "", amount: "", effect_sign: sign };
+}
 
-  const [eventDate, setEventDate] = useState<string>(todayYYYYMMDD());
-  const [eventType, setEventType] = useState<string>(""); // set after enum loads
+export default function JournalEntryModal({ entityId, onClose }: Props) {
+  const [eventDate, setEventDate]     = useState(todayYYYYMMDD());
   const [description, setDescription] = useState("");
-
-  const [lines, setLines] = useState<LineItem[]>([
-    { account_id: "", amount: 0, effect_sign: 1 },
-    { account_id: "", amount: 0, effect_sign: -1 },
+  const [lines, setLines]             = useState<LineItem[]>([
+    makeBlankLine(1),   // debit
+    makeBlankLine(-1),  // credit
   ]);
 
-  // When enum values arrive, pick the first one (or keep existing)
-  useEffect(() => {
-    if (!eventType && eventTypes.length > 0) setEventType(eventTypes[0]);
-  }, [eventType, eventTypes]);
+  const recordEvent = useRecordEconomicEvent();
 
-  const debitTotal = useMemo(
-    () =>
-      lines
-        .filter((l) => l.effect_sign === 1)
-        .reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
-    [lines]
-  );
+  // ── Totals ──────────────────────────────────────────────────────────────
+  const debitTotal  = useMemo(() =>
+    lines.filter(l => l.effect_sign === 1)
+         .reduce((s, l) => s + (parseFloat(l.amount) || 0), 0), [lines]);
 
-  const creditTotal = useMemo(
-    () =>
-      lines
-        .filter((l) => l.effect_sign === -1)
-        .reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
-    [lines]
-  );
+  const creditTotal = useMemo(() =>
+    lines.filter(l => l.effect_sign === -1)
+         .reduce((s, l) => s + (parseFloat(l.amount) || 0), 0), [lines]);
 
-  const diff = Math.abs(debitTotal - creditTotal);
-  const hasPositiveTotals = debitTotal > 0 && creditTotal > 0;
-  const isBalanced = hasPositiveTotals && diff < 0.0001;
+  const isBalanced  = debitTotal > 0 && Math.abs(debitTotal - creditTotal) < 0.0001;
+  const allFilled   = lines.every(l => !!l.account_id && parseFloat(l.amount) > 0);
+  const canSubmit   = !recordEvent.isPending && lines.length >= 2 && isBalanced && allFilled;
 
-  function addLine() {
-    setLines((prev) => [...prev, { account_id: "", amount: 0, effect_sign: 1 }]);
+  // ── Line management ─────────────────────────────────────────────────────
+  function updateLine<K extends keyof LineItem>(i: number, key: K, value: LineItem[K]) {
+    setLines(prev => {
+      const next = [...prev];
+      next[i] = { ...next[i], [key]: value };
+      return next;
+    });
   }
 
-  function removeLine(i: number) {
-    setLines((prev) => prev.filter((_, idx) => idx !== i));
+  function setLineAccount(i: number, id: string, label: string) {
+    setLines(prev => {
+      const next = [...prev];
+      next[i] = { ...next[i], account_id: id, account_label: label };
+      return next;
+    });
   }
 
-  const postJournalMutation = useMutation({
-    mutationFn: async () => {
-      if (!eventType) throw new Error("Select an event type.");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) throw new Error("Invalid date format.");
-      if (lines.length < 2) throw new Error("At least 2 lines (debit + credit) are required.");
+  // ── Submit ───────────────────────────────────────────────────────────────
+  async function handleSubmit() {
+    await recordEvent.mutateAsync(
+      {
+        entityId,
+        eventType: "GENERAL_JOURNAL",
+        eventDate,
+        description: description.trim() || null,
+        effects: lines.map(l => ({
+          account_id:    l.account_id,
+          amount:        parseFloat(l.amount),
+          effect_sign:   l.effect_sign,
+          tax_treatment: null,
+          deductible:    false,
+        })),
+      },
+      { onSuccess: onClose }
+    );
+  }
 
-      // Require selected accounts + positive amounts
-      if (lines.some((l) => !l.account_id)) throw new Error("Each line must have an account.");
-      if (lines.some((l) => Number(l.amount) <= 0)) throw new Error("Each amount must be > 0.");
+  const isPending = recordEvent.isPending;
+  const errorMsg  = recordEvent.error
+    ? String((recordEvent.error as any)?.message ?? recordEvent.error)
+    : null;
 
-      if (!isBalanced) {
-        throw new Error(
-          `Journal must balance and totals must be > 0. (Debits=${debitTotal}, Credits=${creditTotal})`
-        );
-      }
-
-      // DB expects amount positive + sign controls direction (your trigger enforces balance):contentReference[oaicite:3]{index=3}
-      const effects = lines.map((l) => ({
-        account_id: l.account_id,
-        amount: Math.abs(Number(l.amount) || 0),
-        effect_sign: l.effect_sign,
-        tax_treatment: null,
-        deductible: false,
-      }));
-
-      const { data, error } = await supabase.rpc("record_economic_event", {
-        p_entity_id: entityId,
-        p_event_type: eventType, // economic_event_type values include CASH_SALE, GENERAL_JOURNAL etc.:contentReference[oaicite:4]{index=4}
-        p_event_date: eventDate,
-        p_description: description || "",
-        p_effects: effects,
-      });
-
-      if (error) throw error;
-      return data as string; // event_id uuid
-    },
-
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: qk.economicEvents(entityId) }),
-        qc.invalidateQueries({ queryKey: qk.entitySnapshot(entityId) }),
-        qc.invalidateQueries({ queryKey: qk.taxSummary(entityId) }),
-        qc.invalidateQueries({ queryKey: qk.periods(entityId) }),
-      ]);
-      onClose();
-    },
-  });
-
-  const canSubmit =
-    !postJournalMutation.isPending &&
-    !!eventType &&
-    lines.length >= 2 &&
-    lines.every((l) => !!l.account_id && Number(l.amount) > 0) &&
-    isBalanced;
-
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded p-6 w-full max-w-2xl space-y-6 shadow-lg">
-        <h2 className="text-xl font-bold">Record Journal Entry</h2>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
 
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            type="date"
-            value={eventDate}
-            className="border p-2 rounded w-44"
-            disabled={postJournalMutation.isPending}
-            onChange={(e) => setEventDate(e.target.value)}
-          />
-
-          <select
-            className="border p-2 rounded"
-            value={eventType}
-            disabled={postJournalMutation.isPending || eventTypes.length === 0}
-            onChange={(e) => setEventType(e.target.value)}
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h2 className="text-lg font-semibold">General Journal Entry</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Advanced · Post directly to leaf accounts
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 text-2xl leading-none"
+            aria-label="Close"
           >
-            {eventTypes.length === 0 ? (
-              <option value="">No event types found</option>
-            ) : (
-              eventTypes.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))
-            )}
-          </select>
+            ×
+          </button>
         </div>
 
-        <textarea
-          className="border p-2 w-full rounded"
-          placeholder="Description (optional)"
-          value={description}
-          disabled={postJournalMutation.isPending}
-          onChange={(e) => setDescription(e.target.value)}
-        />
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-        <div className="space-y-3">
-          {lines.map((line, i) => (
-            <div key={i} className="grid grid-cols-6 gap-2 items-center">
-              <AccountPicker
-                entityId={entityId}
-                value={line.account_id}
-                onChange={(val) => {
-                  setLines((prev) => {
-                    const updated = [...prev];
-                    updated[i] = { ...updated[i], account_id: val };
-                    return updated;
-                  });
-                }}
-                disabled={postJournalMutation.isPending}
-              />
+          {/* Info banner */}
+          <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800 leading-relaxed">
+            <strong>This is a manual journal entry form.</strong> For common transactions —
+            sales, expenses, payroll, rent — use the activity wizards in the sidebar instead.
+            They auto-generate correct double-entry journals from intent.
+          </div>
 
+          {/* Date + Description row */}
+          <div className="flex gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Date</label>
               <input
-                type="number"
-                className="border p-2 rounded col-span-2"
-                value={line.amount}
-                disabled={postJournalMutation.isPending}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  setLines((prev) => {
-                    const updated = [...prev];
-                    updated[i] = { ...updated[i], amount: next };
-                    return updated;
-                  });
-                }}
+                type="date"
+                value={eventDate}
+                disabled={isPending}
+                onChange={e => setEventDate(e.target.value)}
+                className="border rounded px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-black"
               />
-
-              <select
-                className="border p-2 rounded"
-                value={line.effect_sign}
-                disabled={postJournalMutation.isPending}
-                onChange={(e) => {
-                  const sign = Number(e.target.value) as EffectSign;
-                  setLines((prev) => {
-                    const updated = [...prev];
-                    updated[i] = { ...updated[i], effect_sign: sign };
-                    return updated;
-                  });
-                }}
-              >
-                <option value={1}>Debit</option>
-                <option value={-1}>Credit</option>
-              </select>
-
-              {lines.length > 2 && (
-                <button
-                  type="button"
-                  className="text-red-600 text-sm"
-                  disabled={postJournalMutation.isPending}
-                  onClick={() => removeLine(i)}
-                >
-                  Remove
-                </button>
-              )}
             </div>
-          ))}
+            <div className="flex flex-col gap-1 flex-1">
+              <label className="text-xs font-medium text-gray-500">Description</label>
+              <input
+                type="text"
+                value={description}
+                disabled={isPending}
+                placeholder="Narration (optional)"
+                onChange={e => setDescription(e.target.value)}
+                className="border rounded px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
 
+          {/* Journal lines */}
+          <div>
+            <div className="grid grid-cols-[1fr_120px_100px_24px] gap-2 mb-1 px-1">
+              <span className="text-xs font-medium text-gray-500">Account</span>
+              <span className="text-xs font-medium text-gray-500">Amount</span>
+              <span className="text-xs font-medium text-gray-500">Dr / Cr</span>
+              <span />
+            </div>
+
+            <div className="space-y-2">
+              {lines.map((line, i) => (
+                <div key={i} className="grid grid-cols-[1fr_120px_100px_24px] gap-2 items-center">
+
+                  <AccountPicker
+                    entityId={entityId}
+                    value={line.account_id}
+                    onChange={(id, label) => setLineAccount(i, id, label ?? "")}
+                    disabled={isPending}
+                    leafOnly
+                  />
+
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={line.amount}
+                    disabled={isPending}
+                    onChange={e => updateLine(i, "amount", e.target.value)}
+                    className="border rounded px-3 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-black"
+                  />
+
+                  <select
+                    value={line.effect_sign}
+                    disabled={isPending}
+                    onChange={e => updateLine(i, "effect_sign", Number(e.target.value) as EffectSign)}
+                    className="border rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  >
+                    <option value={1}>Debit</option>
+                    <option value={-1}>Credit</option>
+                  </select>
+
+                  {lines.length > 2 ? (
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => setLines(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-gray-300 hover:text-red-500 text-lg leading-none"
+                      aria-label="Remove line"
+                    >
+                      ×
+                    </button>
+                  ) : <span />}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => setLines(prev => [...prev, makeBlankLine(1)])}
+              className="mt-3 text-xs text-blue-600 hover:underline disabled:opacity-40"
+            >
+              + Add line
+            </button>
+          </div>
+
+          {/* Balance summary */}
+          <div className={`rounded p-3 text-sm flex justify-between items-center ${
+            isBalanced ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"
+          }`}>
+            <div className="space-y-0.5">
+              <div className="text-xs text-gray-500">
+                Debits: <span className="font-mono font-medium text-gray-800">
+                  {debitTotal.toLocaleString("en-ZA", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500">
+                Credits: <span className="font-mono font-medium text-gray-800">
+                  {creditTotal.toLocaleString("en-ZA", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+            <span className={`text-sm font-medium ${isBalanced ? "text-green-700" : "text-red-600"}`}>
+              {isBalanced ? "✔ Balanced" : "✘ Not balanced"}
+            </span>
+          </div>
+
+          {/* DB error */}
+          {errorMsg && (
+            <div className="rounded bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              {errorMsg.includes("parent account")
+                ? <>
+                    <strong>Cannot post to a parent account.</strong>
+                    {" "}Select a child (leaf) account — e.g. "1100 — Cash" not "1000 — Assets".
+                    Parent accounts are summary headers only.
+                  </>
+                : errorMsg
+              }
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-between items-center px-6 py-4 border-t bg-gray-50 rounded-b-lg">
           <button
             type="button"
-            onClick={addLine}
-            disabled={postJournalMutation.isPending}
-            className="text-sm underline mt-2 text-blue-600 disabled:opacity-50"
+            onClick={onClose}
+            disabled={isPending}
+            className="text-sm text-gray-600 hover:text-black disabled:opacity-40"
           >
-            + Add Line
-          </button>
-        </div>
-
-        <div className="bg-gray-50 p-3 rounded text-sm">
-          <div>Debits: {debitTotal.toLocaleString()}</div>
-          <div>Credits: {creditTotal.toLocaleString()}</div>
-          <div className={isBalanced ? "text-green-600" : "text-red-600"}>
-            {isBalanced ? "Balanced ✔" : "Not Balanced ✘"}
-          </div>
-        </div>
-
-        {postJournalMutation.error && (
-          <div className="text-red-600">
-            {String((postJournalMutation.error as any)?.message ?? postJournalMutation.error)}
-          </div>
-        )}
-
-        <div className="flex justify-between">
-          <button type="button" onClick={onClose} disabled={postJournalMutation.isPending}>
             Cancel
           </button>
-
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => postJournalMutation.mutate()}
-            className="bg-black text-white px-4 py-2 rounded disabled:opacity-50"
+            onClick={handleSubmit}
+            className="bg-black text-white text-sm px-5 py-2 rounded shadow hover:bg-gray-800 disabled:opacity-40 transition-colors"
           >
-            {postJournalMutation.isPending ? "Posting…" : "Post Journal Entry"}
+            {isPending ? "Posting…" : "Post Journal Entry"}
           </button>
         </div>
       </div>

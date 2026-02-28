@@ -11,7 +11,7 @@ export type ReportingPeriod = {
   is_closed: boolean;
 };
 
-type PeriodType = "MONTHLY" | "QUARTERLY" | "ANNUAL";
+type PeriodType = "MONTHLY" | "ANNUAL";
 
 export function useReportingPeriods(entityId?: string, periodType: PeriodType = "MONTHLY") {
   const qc = useQueryClient();
@@ -22,10 +22,11 @@ export function useReportingPeriods(entityId?: string, periodType: PeriodType = 
     enabled,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("reporting_periods")
-        .select("id, entity_id, period_start, period_end, is_closed")
-        .eq("entity_id", entityId!)
-        .order("period_start", { ascending: false });
+  .from("reporting_periods")
+  .select("id, entity_id, period_start, period_end, is_closed, period_type, financial_year")
+  .eq("entity_id", entityId!)
+  .eq("period_type", periodType)       
+  .order("period_start", { ascending: false });
 
       if (error) throw error;
       return (data ?? []) as ReportingPeriod[];

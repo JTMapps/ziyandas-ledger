@@ -30,3 +30,4 @@ export type EntitySnapshot = {
   totalLiabilities: number;
   retainedEarnings: number;
 };
+
