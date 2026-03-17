@@ -1,8 +1,6 @@
-// src/domain/templates/personalCapture/ExpenseWizard.tsx
-
 import { useState, useEffect } from "react";
-import { loadAppliedAccounts } from "../TemplateOrchestrator";
-import { TemplateJournalEngine } from "../TemplateOrchestrator";
+import { loadAppliedAccounts, TemplateJournalEngine } from "../TemplateOrchestrator";
+import { useEnsureCoA } from "../../../hooks/useEnsureCoA";
 
 interface Props {
   entityId: string;
@@ -10,6 +8,8 @@ interface Props {
 }
 
 export default function ExpenseWizard({ entityId, onClose }: Props) {
+  const { ensureCoA, ensuring, ensureError } = useEnsureCoA(entityId);
+
   const [accounts, setAccounts] = useState<any[]>([]);
   const [amount, setAmount] = useState(0);
   const [category, setCategory] = useState<string>("");
@@ -17,12 +17,24 @@ export default function ExpenseWizard({ entityId, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadAppliedAccounts(entityId).then((data) => {
-      const expenseAccounts = data.filter(
-        (a) => a.account_type === "EXPENSE"
-      );
-      setAccounts(expenseAccounts);
-    });
+    let alive = true;
+
+    (async () => {
+      try {
+        setError(null);
+        await ensureCoA();
+
+        const data = await loadAppliedAccounts(entityId);
+        const expenseAccounts = data.filter((a) => a.account_type === "EXPENSE");
+        if (alive) setAccounts(expenseAccounts);
+      } catch (e: any) {
+        if (alive) setError(e.message ?? String(e));
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
   }, [entityId]);
 
   async function submit() {
@@ -30,18 +42,21 @@ export default function ExpenseWizard({ entityId, onClose }: Props) {
       setError(null);
       setLoading(true);
 
+      await ensureCoA();
+
       if (!category) throw new Error("Choose an expense category.");
       if (amount <= 0) throw new Error("Amount must be positive.");
 
       await TemplateJournalEngine.personal.expense(entityId, amount, category);
-
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message ?? String(err));
     } finally {
       setLoading(false);
     }
   }
+
+  const busy = loading || ensuring;
 
   return (
     <div className="p-4 space-y-4">
@@ -53,12 +68,14 @@ export default function ExpenseWizard({ entityId, onClose }: Props) {
         placeholder="Amount spent"
         value={amount}
         onChange={(e) => setAmount(Number(e.target.value))}
+        disabled={busy}
       />
 
       <select
         className="border p-2 w-full rounded"
         value={category}
         onChange={(e) => setCategory(e.target.value)}
+        disabled={busy}
       >
         <option value="">Select expense category…</option>
         {accounts.map((a) => (
@@ -68,14 +85,18 @@ export default function ExpenseWizard({ entityId, onClose }: Props) {
         ))}
       </select>
 
-      {error && <div className="text-red-600">{error}</div>}
+      {(error || ensureError) && (
+        <div className="text-red-600 text-sm">
+          {error ?? String((ensureError as any)?.message ?? ensureError)}
+        </div>
+      )}
 
       <button
         onClick={submit}
-        disabled={loading}
-        className="bg-black text-white w-full py-2 rounded"
+        disabled={busy}
+        className="bg-black text-white w-full py-2 rounded disabled:opacity-60"
       >
-        {loading ? "Posting…" : "Post Expense"}
+        {busy ? "Posting…" : "Post Expense"}
       </button>
     </div>
   );

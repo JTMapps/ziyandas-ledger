@@ -1,5 +1,3 @@
-// src/pages/EntityDashboard.tsx
-
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
@@ -26,16 +24,11 @@ type EntityRow = {
   industry_type?: string | null;
 };
 
-// ─── Absolute-path fallback ───────────────────────────────────────────────────
-// MUST use a component (not inline JSX) so useParams() works correctly.
-// A relative <Navigate to="overview"> inside a nested <Routes> appends "overview"
-// to the already-matched path, causing the /overview/overview/overview loop.
 function DashboardFallback() {
   const { entityId } = useParams<{ entityId: string }>();
   return <Navigate to={`/entities/${entityId}/overview`} replace />;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function EntityDashboard() {
   const { entityId } = useParams<{ entityId: string }>();
   const id = entityId ?? "";
@@ -49,6 +42,7 @@ export default function EntityDashboard() {
         .select("id, name, type, industry_type")
         .eq("id", id)
         .single();
+
       if (error) throw error;
       return data as EntityRow;
     },
@@ -59,8 +53,7 @@ export default function EntityDashboard() {
   if (entityQuery.error) {
     return (
       <div className="p-4 text-red-600">
-        Failed to load entity:{" "}
-        {String((entityQuery.error as any)?.message ?? entityQuery.error)}
+        Failed to load entity: {String((entityQuery.error as any)?.message ?? entityQuery.error)}
       </div>
     );
   }
@@ -68,8 +61,8 @@ export default function EntityDashboard() {
   const entity = entityQuery.data;
   if (!entity) return <div className="p-4">Entity not found.</div>;
 
-  const isBusiness        = entity.type === "Business";
-  const industryType      = entity.industry_type ?? null;
+  const isBusiness = entity.type === "Business";
+  const industryType = entity.industry_type ?? null;
   const isIndustryBusiness = isBusiness && !!industryType && industryType !== "Generic";
 
   const tabs: DashboardTab[] = isBusiness
@@ -79,47 +72,31 @@ export default function EntityDashboard() {
   return (
     <DashboardLayout entity={entity} tabs={tabs}>
       <Routes>
-        {/* ── Common tabs ────────────────────────────────────────────── */}
-        <Route path="overview"   element={<OverviewPage />} />
-        <Route path="ledger"     element={<LedgerPage />} />
+        {/* Common tabs */}
+        <Route path="overview" element={<OverviewPage />} />
+        <Route path="ledger" element={<LedgerPage />} />
         <Route path="statements" element={<StatementsPage />} />
 
-        {/* ── Business-only tabs ─────────────────────────────────────── */}
+        {/* Business-only tabs */}
         {isBusiness && (
           <>
-            <Route path="tax-ecl"  element={<TaxECLPage />} />
+            <Route path="tax-ecl" element={<TaxECLPage />} />
             <Route path="year-end" element={<YearEndPage />} />
           </>
         )}
 
-        {/* ── Generic business capture wizards ───────────────────────── */}
-        {/* Available for ALL business entities (Generic + industry).     */}
-        {/* Previously unregistered — every click fell to the * catch-all */}
-        {/* and triggered the /overview/overview/... loop.                */}
-        {isBusiness && (
-          <Route
-            path="capture/general/:wizardType"
-            element={<GeneralCaptureWizard />}
-          />
-        )}
+        {/* Generic business capture (works with ?type=...) */}
+        {isBusiness && <Route path="capture/general" element={<GeneralCaptureWizard />} />}
 
-        {/* ── Industry capture (non-Generic business only) ───────────── */}
+        {/* Industry capture (ONLY non-Generic industry businesses) */}
         {isIndustryBusiness && (
-          <Route
-            path="capture/industry/*"
-            element={<IndustryRouter industryType={industryType} />}
-          />
+          <Route path="capture/industry/*" element={<IndustryRouter industryType={industryType} />} />
         )}
 
-        {/* ── Personal capture ───────────────────────────────────────── */}
-        {!isBusiness && (
-          <Route path="capture/personal/*" element={<PersonalDashboard />} />
-        )}
+        {/* Personal capture */}
+        {!isBusiness && <Route path="capture/personal/*" element={<PersonalDashboard />} />}
 
-        {/* ── Catch-all ──────────────────────────────────────────────── */}
-        {/* MUST be a component that calls useParams() to build an        */}
-        {/* absolute path. A relative to="overview" string appends to the */}
-        {/* current matched path and causes an infinite redirect loop.    */}
+        {/* Catch-all */}
         <Route path="*" element={<DashboardFallback />} />
       </Routes>
     </DashboardLayout>

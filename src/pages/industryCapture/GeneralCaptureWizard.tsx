@@ -24,12 +24,14 @@
 //   OWNER_INVESTMENT     → IAS 1 / IAS 32 Equity
 //   OWNER_WITHDRAWAL     → IAS 1 / IAS 32 Equity
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AccountPicker from "../../components/pickers/AccountPicker";
 import { useRecordEconomicEvent } from "../../hooks/useEconomicEvents";
 import { toDateYYYYMMDD } from "../../lib/eventUtils";
 import type { EconomicEventType } from "../../domain/events/eventTypes";
+
+import { useEnsureCoA } from "../../hooks/useEnsureCoA";
 
 // ─── Shared field components ─────────────────────────────────────────────────
 
@@ -615,7 +617,43 @@ export default function GeneralCaptureWizard() {
   const navigate        = useNavigate();
   const eventType       = params.get("type") ?? "";
 
+    const { ensureCoA, ensuring, ensureError } = useEnsureCoA(entityId);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await ensureCoA();
+        if (alive) setReady(true);
+      } catch {
+        if (alive) setReady(true); // ready but will show error block
+      }
+    })();
+    return () => { alive = false; };
+  }, [entityId]);
+
   if (!entityId) return <div className="p-4 text-red-600">Missing entityId in route.</div>;
+
+    if (!ready || ensuring) {
+    return <div className="p-6 max-w-lg mx-auto text-sm text-gray-500">Preparing chart of accounts…</div>;
+  }
+
+  if (ensureError) {
+    return (
+      <div className="p-6 max-w-lg mx-auto">
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">
+          {String((ensureError as any)?.message ?? ensureError)}
+        </div>
+        <button
+          onClick={() => navigate(`/entities/${entityId}/ledger`)}
+          className="mt-4 text-sm text-gray-500 hover:text-black"
+        >
+          ← Back to Ledger
+        </button>
+      </div>
+    );
+  }
 
   const WizardForm = WIZARD_MAP[eventType];
 

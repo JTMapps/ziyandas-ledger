@@ -5,121 +5,282 @@
 // Reads entity.industry_type via direct supabase query to show the right quick-capture
 // actions for the current entity's industry.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 import { qk } from "../../hooks/queryKeys";
 import { useEvents } from "../../hooks/useEconomicEvents";
 import JournalEntryModal from "../../components/events/JournalEntryModal";
-// ─── Capture action definitions ───────────────────────────────────────────────
-// Routes match the actual file paths in /src/pages/industryCapture/ and
-// /src/domain/templates/personalCapture/. All paths are relative to
-// /entities/:entityId/
 
 type Category = "income" | "expense" | "asset" | "equity" | "transfer";
 
 interface CaptureAction {
   label: string;
   description: string;
+  /** Relative to /entities/:entityId/ */
   route: string;
   icon: string;
   category: Category;
 }
 
-// Generic business (no industry specialisation)
+/**
+ * Helper: keep your routing consistent.
+ * - `route` is relative to /entities/:entityId/
+ * - Generic capture goes through GeneralCaptureWizard: /capture/general?type=...
+ * - Industry capture goes through IndustryRouter: /capture/industry/<industry>/<action>
+ */
+function makeRoute(path: string) {
+  return path.replace(/^\/+/, "");
+}
+
+/** ----------------------------
+ *  Generic business (NO industry)
+ *  GeneralCaptureWizard expects ?type=...
+ *  ---------------------------- */
 const GENERIC_BUSINESS: CaptureAction[] = [
-  { label: "Cash Sale",         description: "Record revenue received in cash",       route: "capture/general/cash-sale",        icon: "💵", category: "income"   },
-  { label: "Credit Sale",       description: "Invoice a customer — creates receivable", route: "capture/general/credit-sale",    icon: "🧾", category: "income"   },
-  { label: "Cash Expense",      description: "Expense paid directly from cash",        route: "capture/general/cash-expense",    icon: "📤", category: "expense"  },
-  { label: "Expense on Credit", description: "Bill received, not yet paid",            route: "capture/general/credit-expense",  icon: "📋", category: "expense"  },
-  { label: "Asset Purchase",    description: "Buy a long-term asset for cash",         route: "capture/general/asset-purchase",  icon: "🏗️", category: "asset"    },
-  { label: "Depreciation",      description: "Record period depreciation charge",      route: "capture/general/depreciation",    icon: "📉", category: "asset"    },
-  { label: "Loan Received",     description: "Borrow funds — creates liability",       route: "capture/general/loan-received",   icon: "🏦", category: "equity"   },
-  { label: "Loan Repaid",       description: "Repay principal on a loan",              route: "capture/general/loan-repaid",     icon: "↩️", category: "equity"   },
-  { label: "Owner Investment",  description: "Capital contributed by the owner",       route: "capture/general/owner-investment",icon: "💼", category: "equity"   },
-  { label: "Owner Withdrawal",  description: "Drawings taken by the owner",            route: "capture/general/owner-withdrawal",icon: "💸", category: "equity"   },
+  {
+    label: "Cash Sale",
+    description: "Record revenue received in cash",
+    route: makeRoute("capture/general?type=CASH_SALE"),
+    icon: "💵",
+    category: "income",
+  },
+  {
+    label: "Credit Sale",
+    description: "Invoice a customer — creates receivable",
+    route: makeRoute("capture/general?type=CREDIT_SALE"),
+    icon: "🧾",
+    category: "income",
+  },
+  {
+    label: "Cash Expense",
+    description: "Expense paid directly from cash",
+    route: makeRoute("capture/general?type=CASH_EXPENSE"),
+    icon: "📤",
+    category: "expense",
+  },
+  {
+    label: "Expense on Credit",
+    description: "Bill received, not yet paid",
+    route: makeRoute("capture/general?type=EXPENSE_ON_CREDIT"),
+    icon: "📋",
+    category: "expense",
+  },
+  {
+    label: "Asset Purchase",
+    description: "Buy a long-term asset for cash",
+    route: makeRoute("capture/general?type=ASSET_PURCHASED_CASH"),
+    icon: "🏗️",
+    category: "asset",
+  },
+  {
+    label: "Depreciation",
+    description: "Record period depreciation charge",
+    route: makeRoute("capture/general?type=DEPRECIATION"),
+    icon: "📉",
+    category: "asset",
+  },
+  {
+    label: "Loan Received",
+    description: "Borrow funds — creates liability",
+    route: makeRoute("capture/general?type=LOAN_RECEIVED"),
+    icon: "🏦",
+    category: "equity",
+  },
+  {
+    label: "Loan Repaid",
+    description: "Repay principal on a loan",
+    route: makeRoute("capture/general?type=LOAN_REPAID"),
+    icon: "↩️",
+    category: "equity",
+  },
+  {
+    label: "Owner Investment",
+    description: "Capital contributed by the owner",
+    route: makeRoute("capture/general?type=OWNER_INVESTMENT"),
+    icon: "💼",
+    category: "equity",
+  },
+  {
+    label: "Owner Withdrawal",
+    description: "Drawings taken by the owner",
+    route: makeRoute("capture/general?type=OWNER_WITHDRAWAL"),
+    icon: "💸",
+    category: "equity",
+  },
 ];
 
-// Industry-specific actions — routes match actual wizard files
+/** ----------------------------
+ *  Industry-specific routes MUST match IndustryRouter.tsx
+ *  IndustryRouter paths:
+ *    Retail:        retail/sale, retail/purchase
+ *    Manufacturing: manufacturing/consume, manufacturing/complete
+ *    Services:      services/invoice, services/contractor
+ *    Hospitality:   hospitality/room-sale, hospitality/meal-service
+ *    RealEstate:    real-estate/rent-income, real-estate/maintenance
+ *  ---------------------------- */
 const RETAIL_ACTIONS: CaptureAction[] = [
-  { label: "Retail Sale",         description: "Record a retail sale with COGS",   route: "capture/industry/retail-sale",             icon: "🛒", category: "income"  },
-  { label: "Purchase Inventory",  description: "Buy inventory from a supplier",    route: "capture/industry/retail-purchase",          icon: "📦", category: "expense" },
-  ...GENERIC_BUSINESS.filter(a => ["Asset Purchase","Depreciation","Loan Received","Loan Repaid","Owner Investment","Owner Withdrawal"].includes(a.label)),
+  {
+    label: "Retail Sale",
+    description: "Record a retail sale with COGS",
+    route: makeRoute("capture/industry/retail/sale"),
+    icon: "🛒",
+    category: "income",
+  },
+  {
+    label: "Purchase Inventory",
+    description: "Buy inventory from a supplier",
+    route: makeRoute("capture/industry/retail/purchase"),
+    icon: "📦",
+    category: "expense",
+  },
+  ...GENERIC_BUSINESS.filter((a) =>
+    ["Asset Purchase", "Depreciation", "Loan Received", "Loan Repaid", "Owner Investment", "Owner Withdrawal"].includes(a.label)
+  ),
 ];
 
 const MANUFACTURING_ACTIONS: CaptureAction[] = [
-  { label: "Consume Raw Materials",   description: "Move materials to WIP",        route: "capture/industry/manufacturing-consume",   icon: "⚙️", category: "expense" },
-  { label: "Complete Production Batch", description: "Move WIP to finished goods", route: "capture/industry/manufacturing-complete",  icon: "🏭", category: "income"  },
-  ...GENERIC_BUSINESS.filter(a => ["Cash Sale","Credit Sale","Asset Purchase","Depreciation","Owner Investment","Owner Withdrawal"].includes(a.label)),
+  {
+    label: "Consume Raw Materials",
+    description: "Move materials to WIP",
+    route: makeRoute("capture/industry/manufacturing/consume"),
+    icon: "⚙️",
+    category: "expense",
+  },
+  {
+    label: "Complete Production Batch",
+    description: "Move WIP to finished goods",
+    route: makeRoute("capture/industry/manufacturing/complete"),
+    icon: "🏭",
+    category: "income",
+  },
+  ...GENERIC_BUSINESS.filter((a) =>
+    ["Cash Sale", "Credit Sale", "Asset Purchase", "Depreciation", "Owner Investment", "Owner Withdrawal"].includes(a.label)
+  ),
 ];
 
 const SERVICES_ACTIONS: CaptureAction[] = [
-  { label: "Client Invoice",    description: "Invoice a client for services rendered", route: "capture/industry/services-invoice",    icon: "📨", category: "income"  },
-  { label: "Pay Contractor",    description: "Pay an external contractor",             route: "capture/industry/services-contractor", icon: "🤝", category: "expense" },
-  ...GENERIC_BUSINESS.filter(a => ["Cash Expense","Expense on Credit","Loan Received","Owner Investment","Owner Withdrawal"].includes(a.label)),
+  {
+    label: "Client Invoice",
+    description: "Invoice a client for services rendered",
+    route: makeRoute("capture/industry/services/invoice"),
+    icon: "📨",
+    category: "income",
+  },
+  {
+    label: "Pay Contractor",
+    description: "Pay an external contractor",
+    route: makeRoute("capture/industry/services/contractor"),
+    icon: "🤝",
+    category: "expense",
+  },
+  ...GENERIC_BUSINESS.filter((a) =>
+    ["Cash Expense", "Expense on Credit", "Loan Received", "Owner Investment", "Owner Withdrawal"].includes(a.label)
+  ),
 ];
 
 const REAL_ESTATE_ACTIONS: CaptureAction[] = [
-  { label: "Rent Income",        description: "Tenant rental payment received",         route: "capture/industry/realestate-rent",        icon: "🏠", category: "income"  },
-  { label: "Maintenance Expense", description: "Property maintenance or repair cost",  route: "capture/industry/realestate-maintenance", icon: "🔧", category: "expense" },
-  ...GENERIC_BUSINESS.filter(a => ["Asset Purchase","Depreciation","Loan Received","Loan Repaid","Owner Investment","Owner Withdrawal"].includes(a.label)),
+  {
+    label: "Rent Income",
+    description: "Tenant rental payment received",
+    route: makeRoute("capture/industry/real-estate/rent-income"),
+    icon: "🏠",
+    category: "income",
+  },
+  {
+    label: "Maintenance Expense",
+    description: "Property maintenance or repair cost",
+    route: makeRoute("capture/industry/real-estate/maintenance"),
+    icon: "🔧",
+    category: "expense",
+  },
+  ...GENERIC_BUSINESS.filter((a) =>
+    ["Asset Purchase", "Depreciation", "Loan Received", "Loan Repaid", "Owner Investment", "Owner Withdrawal"].includes(a.label)
+  ),
 ];
 
 const HOSPITALITY_ACTIONS: CaptureAction[] = [
-  { label: "Room Sale",     description: "Room night revenue",              route: "capture/industry/hospitality-room",    icon: "🛏️", category: "income"  },
-  { label: "Meal Service",  description: "Food & beverage service revenue", route: "capture/industry/hospitality-meal",    icon: "🍽️", category: "income"  },
-  ...GENERIC_BUSINESS.filter(a => ["Cash Expense","Expense on Credit","Asset Purchase","Depreciation","Owner Investment","Owner Withdrawal"].includes(a.label)),
+  {
+    label: "Room Sale",
+    description: "Room night revenue",
+    route: makeRoute("capture/industry/hospitality/room-sale"),
+    icon: "🛏️",
+    category: "income",
+  },
+  {
+    label: "Meal Service",
+    description: "Food & beverage service revenue",
+    route: makeRoute("capture/industry/hospitality/meal-service"),
+    icon: "🍽️",
+    category: "income",
+  },
+  ...GENERIC_BUSINESS.filter((a) =>
+    ["Cash Expense", "Expense on Credit", "Asset Purchase", "Depreciation", "Owner Investment", "Owner Withdrawal"].includes(a.label)
+  ),
 ];
 
+/** Personal routes (these are real pages you have) */
 const PERSONAL_ACTIONS: CaptureAction[] = [
-  { label: "Salary / Income",  description: "Record a salary or income received",    route: "capture/personal/salary",   icon: "💰", category: "income"   },
-  { label: "Expense",          description: "Record a personal expense",             route: "capture/personal/expense",  icon: "🧾", category: "expense"  },
-  { label: "Transfer",         description: "Move money between your accounts",      route: "capture/personal/transfer", icon: "↔️", category: "transfer" },
+  {
+    label: "Salary / Income",
+    description: "Record a salary or income received",
+    route: makeRoute("capture/personal/salary"),
+    icon: "💰",
+    category: "income",
+  },
+  {
+    label: "Expense",
+    description: "Record a personal expense",
+    route: makeRoute("capture/personal/expense"),
+    icon: "🧾",
+    category: "expense",
+  },
+  {
+    label: "Transfer",
+    description: "Move money between your accounts",
+    route: makeRoute("capture/personal/transfer"),
+    icon: "↔️",
+    category: "transfer",
+  },
 ];
 
-// Map industry_type → action set
-// industry_type values match what's stored in entities.industry_type
 const ACTIONS_BY_INDUSTRY: Record<string, CaptureAction[]> = {
-  Generic:       GENERIC_BUSINESS,
-  Retail:        RETAIL_ACTIONS,
+  Generic: GENERIC_BUSINESS,
+  Retail: RETAIL_ACTIONS,
   Manufacturing: MANUFACTURING_ACTIONS,
-  Services:      SERVICES_ACTIONS,
-  RealEstate:    REAL_ESTATE_ACTIONS,
-  Hospitality:   HOSPITALITY_ACTIONS,
-  Personal:      PERSONAL_ACTIONS,
+  Services: SERVICES_ACTIONS,
+  RealEstate: REAL_ESTATE_ACTIONS,
+  Hospitality: HOSPITALITY_ACTIONS,
+  Personal: PERSONAL_ACTIONS,
 };
 
-const CATEGORY_STYLE: Record<Category | "transfer", string> = {
-  income:   "bg-emerald-50 border-emerald-200 hover:bg-emerald-100",
-  expense:  "bg-rose-50    border-rose-200    hover:bg-rose-100",
-  asset:    "bg-sky-50     border-sky-200     hover:bg-sky-100",
-  equity:   "bg-violet-50  border-violet-200  hover:bg-violet-100",
-  transfer: "bg-amber-50   border-amber-200   hover:bg-amber-100",
+const CATEGORY_STYLE: Record<Category, string> = {
+  income: "bg-emerald-50 border-emerald-200 hover:bg-emerald-100",
+  expense: "bg-rose-50 border-rose-200 hover:bg-rose-100",
+  asset: "bg-sky-50 border-sky-200 hover:bg-sky-100",
+  equity: "bg-violet-50 border-violet-200 hover:bg-violet-100",
+  transfer: "bg-amber-50 border-amber-200 hover:bg-amber-100",
 };
 
-const CATEGORY_LABEL_STYLE: Record<Category | "transfer", string> = {
-  income:   "text-emerald-700",
-  expense:  "text-rose-700",
-  asset:    "text-sky-700",
-  equity:   "text-violet-700",
+const CATEGORY_LABEL_STYLE: Record<Category, string> = {
+  income: "text-emerald-700",
+  expense: "text-rose-700",
+  asset: "text-sky-700",
+  equity: "text-violet-700",
   transfer: "text-amber-700",
 };
 
-const ALL_CATEGORIES: Array<Category | "all"> = ["all", "income", "expense", "asset", "equity", "transfer"];
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function LedgerPage() {
-  const { entityId }      = useParams<{ entityId: string }>();
-  const navigate          = useNavigate();
-  const [showModal, setShowModal]           = useState(false);
+  const { entityId } = useParams<{ entityId: string }>();
+  const navigate = useNavigate();
+  const [showModal, setShowModal] = useState(false);
   const [activeCategory, setActiveCategory] = useState<Category | "all">("all");
 
   if (!entityId) return <div className="p-4">Missing entityId in route.</div>;
 
   // Fetch entity row directly — avoids depending on EntityProvider being in scope
-  const { data: entity } = useQuery({
+  const entityQuery = useQuery({
     queryKey: ["entity", entityId],
     enabled: !!entityId,
     staleTime: 5 * 60_000,
@@ -135,13 +296,14 @@ export default function LedgerPage() {
   });
 
   // Derive industry — falls back to "Generic" while loading or if unset
-  const industryType  = entity?.type === "Personal"
-    ? "Personal"
-    : (entity?.industry_type ?? "Generic");
+  const industryType =
+    entityQuery.data?.type === "Personal"
+      ? "Personal"
+      : entityQuery.data?.industry_type ?? "Generic";
 
   const actions = ACTIONS_BY_INDUSTRY[industryType] ?? GENERIC_BUSINESS;
 
-  // ── Accounts check ────────────────────────────────────────────────────────
+  // Accounts check
   const accountsCountQuery = useQuery<number>({
     queryKey: qk.accountsCount(entityId),
     enabled: !!entityId,
@@ -160,33 +322,30 @@ export default function LedgerPage() {
 
   const hasAccounts = (accountsCountQuery.data ?? 0) > 0;
 
-  // ── Events ────────────────────────────────────────────────────────────────
+  // Events
   const eventsQuery = useEvents(entityId);
-  const events      = eventsQuery.data ?? [];
+  const events = eventsQuery.data ?? [];
 
-  // ── Filtered actions ──────────────────────────────────────────────────────
-  const visibleActions = activeCategory === "all"
-    ? actions
-    : actions.filter(a => a.category === activeCategory);
+  // Filtered actions
+  const visibleActions =
+    activeCategory === "all" ? actions : actions.filter((a) => a.category === activeCategory);
 
-  // Available filter categories for this industry
-  const availableCategories = ["all", ...new Set(actions.map(a => a.category))] as Array<Category | "all">;
+  const availableCategories = useMemo(() => {
+    return ["all", ...new Set(actions.map((a) => a.category))] as Array<Category | "all">;
+  }, [actions]);
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
-
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex justify-between items-start">
         <div>
           <h2 className="text-2xl font-bold">Ledger</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {industryType !== "Generic" && industryType !== "Personal"
-              ? `${industryType} entity · `
-              : ""}
+            {industryType !== "Generic" && industryType !== "Personal" ? `${industryType} entity · ` : ""}
             Record activity · View event history
           </p>
         </div>
+
         {hasAccounts && (
           <button
             type="button"
@@ -199,13 +358,13 @@ export default function LedgerPage() {
         )}
       </div>
 
-      {/* ── No accounts warning ── */}
+      {/* No accounts warning */}
       {!accountsCountQuery.isLoading && !hasAccounts && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 space-y-3 text-sm">
           <div className="font-semibold text-yellow-900">No chart of accounts found.</div>
           <p className="text-yellow-800 text-xs leading-relaxed">
-            A chart of accounts is required before recording any events.
-            Go to template setup to apply one for this entity.
+            A chart of accounts is required before recording any events. Go to template setup to apply one for
+            this entity.
           </p>
           <div className="flex gap-2">
             <button
@@ -224,17 +383,14 @@ export default function LedgerPage() {
         </div>
       )}
 
-      {/* ── Quick capture ── */}
+      {/* Quick capture */}
       {hasAccounts && (
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              Quick Capture
-            </h3>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quick Capture</h3>
 
-            {/* Category filter pills — only show categories that exist for this industry */}
             <div className="flex gap-1.5">
-              {availableCategories.map(cat => (
+              {availableCategories.map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat as Category | "all")}
@@ -251,7 +407,7 @@ export default function LedgerPage() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-            {visibleActions.map(action => (
+            {visibleActions.map((action) => (
               <button
                 key={action.label}
                 type="button"
@@ -271,14 +427,14 @@ export default function LedgerPage() {
         </section>
       )}
 
-      {/* ── Event history ── */}
+      {/* Event history */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Event History
-          </h3>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Event History</h3>
           {events.length > 0 && (
-            <span className="text-xs text-gray-400">{events.length} event{events.length !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-gray-400">
+              {events.length} event{events.length !== 1 ? "s" : ""}
+            </span>
           )}
         </div>
 
@@ -293,9 +449,12 @@ export default function LedgerPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-
               {eventsQuery.isLoading && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-sm">
+                    Loading…
+                  </td>
+                </tr>
               )}
 
               {!eventsQuery.isLoading && events.length === 0 && (
@@ -311,7 +470,7 @@ export default function LedgerPage() {
                 </tr>
               )}
 
-              {events.map(ev => (
+              {events.map((ev) => (
                 <tr key={ev.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{ev.event_date}</td>
                   <td className="px-4 py-3 text-gray-800 text-sm">
@@ -332,24 +491,22 @@ export default function LedgerPage() {
                   </td>
                 </tr>
               ))}
-
             </tbody>
           </table>
         </div>
       </section>
 
-      {/* ── Errors ── */}
-      {(eventsQuery.error || accountsCountQuery.error) && (
+      {/* Errors */}
+      {(eventsQuery.error || accountsCountQuery.error || entityQuery.error) && (
         <div className="text-xs rounded bg-red-50 border border-red-200 p-3 text-red-600 space-y-1">
+          {entityQuery.error && <div>Entity: {String((entityQuery.error as any)?.message)}</div>}
           {eventsQuery.error && <div>Events: {String((eventsQuery.error as any)?.message)}</div>}
           {accountsCountQuery.error && <div>Accounts: {String((accountsCountQuery.error as any)?.message)}</div>}
         </div>
       )}
 
-      {/* ── General journal escape hatch ── */}
-      {showModal && (
-        <JournalEntryModal entityId={entityId} onClose={() => setShowModal(false)} />
-      )}
+      {/* General journal escape hatch */}
+      {showModal && <JournalEntryModal entityId={entityId} onClose={() => setShowModal(false)} />}
     </div>
   );
 }

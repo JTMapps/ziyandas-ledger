@@ -1,7 +1,6 @@
-// src/domain/templates/personalCapture/SalaryWizard.tsx
-
 import { useState } from "react";
 import { TemplateJournalEngine } from "../TemplateOrchestrator";
+import { useEnsureCoA } from "../../../hooks/useEnsureCoA";
 
 interface Props {
   entityId: string;
@@ -9,6 +8,8 @@ interface Props {
 }
 
 export default function SalaryWizard({ entityId, onClose }: Props) {
+  const { ensureCoA, ensuring, ensureError } = useEnsureCoA(entityId);
+
   const [amount, setAmount] = useState<number>(0);
   const [source, setSource] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -19,19 +20,20 @@ export default function SalaryWizard({ entityId, onClose }: Props) {
       setError(null);
       setLoading(true);
 
-      if (amount <= 0) {
-        throw new Error("Amount must be greater than 0.");
-      }
+      await ensureCoA();
 
+      if (amount <= 0) throw new Error("Amount must be greater than 0.");
       await TemplateJournalEngine.personal.salary(entityId, amount, source);
 
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message ?? String(err));
     } finally {
       setLoading(false);
     }
   }
+
+  const busy = loading || ensuring;
 
   return (
     <div className="p-4 space-y-4">
@@ -43,6 +45,7 @@ export default function SalaryWizard({ entityId, onClose }: Props) {
         placeholder="Amount received"
         value={amount}
         onChange={(e) => setAmount(Number(e.target.value))}
+        disabled={busy}
       />
 
       <input
@@ -51,16 +54,21 @@ export default function SalaryWizard({ entityId, onClose }: Props) {
         placeholder="Income source (optional)"
         value={source}
         onChange={(e) => setSource(e.target.value)}
+        disabled={busy}
       />
 
-      {error && <div className="text-red-600">{error}</div>}
+      {(error || ensureError) && (
+        <div className="text-red-600 text-sm">
+          {error ?? String((ensureError as any)?.message ?? ensureError)}
+        </div>
+      )}
 
       <button
         onClick={submit}
-        disabled={loading}
-        className="bg-black text-white w-full py-2 rounded"
+        disabled={busy}
+        className="bg-black text-white w-full py-2 rounded disabled:opacity-60"
       >
-        {loading ? "Posting…" : "Post Salary"}
+        {busy ? "Posting…" : "Post Salary"}
       </button>
     </div>
   );

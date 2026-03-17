@@ -16,7 +16,8 @@ export const STATEMENT_TYPE_MAP: Record<UiStatementType, DbStatementType> = {
   EQUITY: "EQUITY",
 };
 
-export const UI_STATEMENT_TYPES: UiStatementType[] = ["SOFP", "P&L", "OCI", "CF"];
+
+export const UI_STATEMENT_TYPES: UiStatementType[] = ["SOFP", "P&L", "OCI", "CF", "EQUITY"];
 
 export const UI_STATEMENT_LABEL: Record<UiStatementType, string> = {
   SOFP: "Statement of Financial Position",
