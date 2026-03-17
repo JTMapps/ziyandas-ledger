@@ -133,7 +133,7 @@ export default function AccountPicker({
         .order("account_code", { ascending: true });
 
       if (error) throw error;
-      return (data ?? []) as Account[];
+      return (data ?? []) as unknown as Account[];
     },
   });
 
