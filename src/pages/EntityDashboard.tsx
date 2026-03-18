@@ -1,6 +1,7 @@
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+// src/pages/EntityDashboard.tsx
 
+import { Routes, Route, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import DashboardLayout from "../components/layout/DashboardLayout";
 
@@ -24,9 +25,22 @@ type EntityRow = {
   industry_type?: string | null;
 };
 
+// Absolute-path fallback (good as-is)
 function DashboardFallback() {
   const { entityId } = useParams<{ entityId: string }>();
   return <Navigate to={`/entities/${entityId}/overview`} replace />;
+}
+
+/**
+ * Compat redirect:
+ * Old URLs: /entities/:id/capture/general/LOAN_RECEIVED
+ * New URLs: /entities/:id/capture/general?type=LOAN_RECEIVED
+ */
+function GeneralCaptureCompatRedirect() {
+  const { entityId, wizardType } = useParams<{ entityId: string; wizardType: string }>();
+  if (!entityId) return <Navigate to="/" replace />;
+  const type = encodeURIComponent(wizardType ?? "");
+  return <Navigate to={`/entities/${entityId}/capture/general?type=${type}`} replace />;
 }
 
 export default function EntityDashboard() {
@@ -42,7 +56,6 @@ export default function EntityDashboard() {
         .select("id, name, type, industry_type")
         .eq("id", id)
         .single();
-
       if (error) throw error;
       return data as EntityRow;
     },
@@ -72,12 +85,12 @@ export default function EntityDashboard() {
   return (
     <DashboardLayout entity={entity} tabs={tabs}>
       <Routes>
-        {/* Common tabs */}
+        {/* Common */}
         <Route path="overview" element={<OverviewPage />} />
         <Route path="ledger" element={<LedgerPage />} />
         <Route path="statements" element={<StatementsPage />} />
 
-        {/* Business-only tabs */}
+        {/* Business-only */}
         {isBusiness && (
           <>
             <Route path="tax-ecl" element={<TaxECLPage />} />
@@ -85,10 +98,15 @@ export default function EntityDashboard() {
           </>
         )}
 
-        {/* Generic business capture (works with ?type=...) */}
+        {/* ✅ Generic business capture (query param route) */}
         {isBusiness && <Route path="capture/general" element={<GeneralCaptureWizard />} />}
 
-        {/* Industry capture (ONLY non-Generic industry businesses) */}
+        {/* ✅ Optional: keep old deep links working */}
+        {isBusiness && (
+          <Route path="capture/general/:wizardType" element={<GeneralCaptureCompatRedirect />} />
+        )}
+
+        {/* ✅ Industry capture ONLY for industry business */}
         {isIndustryBusiness && (
           <Route path="capture/industry/*" element={<IndustryRouter industryType={industryType} />} />
         )}

@@ -1,12 +1,16 @@
 // src/hooks/useEnsureCoA.ts
+import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { useEnsureEntityAccounts } from "./useEnsureEntityAccounts";
 
+type EntityLite = { id: string; type: string; industry_type: string | null };
+
 export function useEnsureCoA(entityId?: string) {
   const ensure = useEnsureEntityAccounts();
 
-  const entityQuery = useQuery({
+  // Keep this query for screens that want entity info/caching.
+  const entityQuery = useQuery<EntityLite>({
     queryKey: ["entity", entityId, "type"],
     enabled: !!entityId,
     staleTime: 5 * 60_000,
@@ -17,17 +21,32 @@ export function useEnsureCoA(entityId?: string) {
         .eq("id", entityId!)
         .single();
       if (error) throw error;
-      return data;
+      return data as EntityLite;
     },
   });
 
-  async function run() {
-    if (!entityQuery.data) throw new Error("Entity not loaded yet.");
-    await ensure.mutateAsync({
-      entityId: entityQuery.data.id,
-      entityType: entityQuery.data.type, // must match DB enum values: "Business" | "Personal"
+  // ✅ ONLY depend on stable primitives/functions
+  const mutateAsync = ensure.mutateAsync;
+  const refetch = entityQuery.refetch;
+  const cachedEntity = entityQuery.data;
+
+  const ensureCoA = useCallback(async () => {
+    if (!entityId) throw new Error("Missing entityId.");
+
+    // Prefer cached, otherwise refetch once.
+    let entity = cachedEntity;
+    if (!entity) {
+      const res = await refetch();
+      entity = res.data as EntityLite | undefined;
+    }
+
+    if (!entity) throw new Error("Entity not loaded yet.");
+
+    await mutateAsync({
+      entityId: entity.id,
+      entityType: entity.type, // must match DB enum tokens
     });
-  }
+  }, [entityId, cachedEntity, refetch, mutateAsync]);
 
   return {
     entity: entityQuery.data,
@@ -35,6 +54,6 @@ export function useEnsureCoA(entityId?: string) {
     entityError: entityQuery.error,
     ensuring: ensure.isPending,
     ensureError: ensure.error,
-    ensureCoA: run,
+    ensureCoA,
   };
 }
